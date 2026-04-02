@@ -19,3 +19,4 @@ dist/
 .idea/
 .vscode/
 .DS_Store
+\n# Claude Code memory\n.claude/memory/
