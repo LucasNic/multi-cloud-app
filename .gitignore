@@ -1,0 +1,21 @@
+# Go
+bin/
+*.exe
+vendor/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Docker
+.dockerignore
+
+# Env
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+.DS_Store

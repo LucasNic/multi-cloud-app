@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Multi-Cloud Resilience — Live Tracing</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Multi-Cloud Resilience Platform</h1>
+    <div id="cluster-badge">
+      <span class="label">Active cluster:</span>
+      <span id="cluster-name">connecting...</span>
+    </div>
+  </header>
+
+  <main>
+    <section id="graph-container">
+      <svg id="graph"></svg>
+    </section>
+
+    <aside id="controls">
+      <h2>Simulate</h2>
+      <button id="btn-request" class="btn primary">Standard Request</button>
+      <button id="btn-async" class="btn primary">Async Flow</button>
+      <button id="btn-fail" class="btn danger">Simulate Failure</button>
+
+      <h2>Active Traces</h2>
+      <ul id="trace-list"></ul>
+    </aside>
+  </main>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

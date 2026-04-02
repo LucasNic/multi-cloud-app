@@ -1,0 +1,36 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 50
+
+exporters:
+  # Local dev: export to Jaeger for trace inspection
+  jaeger:
+    endpoint: jaeger:14250
+    tls:
+      insecure: true
+
+  # Trace streamer receives spans via OTLP to convert to WebSocket events
+  otlp/streamer:
+    endpoint: trace-streamer:4317
+    tls:
+      insecure: true
+
+  # Production: export to OCI Logging / GCP Cloud Trace
+  logging:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [jaeger, otlp/streamer, logging]

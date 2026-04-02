@@ -1,0 +1,81 @@
+version: "3.9"
+
+# Local development stack
+# Runs all 3 services + OpenTelemetry Collector + CockroachDB (local)
+#
+# Usage:
+#   docker compose up
+#   Frontend: http://localhost:5173
+#   Backend:  http://localhost:8080
+#   Streamer: ws://localhost:8081/ws
+#   Jaeger:   http://localhost:16686 (trace UI for local dev)
+
+services:
+
+  backend:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgresql://root@cockroachdb:26257/appdb?sslmode=disable
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_SERVICE_NAME=backend
+      - CLUSTER_ROLE=local
+    depends_on:
+      - cockroachdb
+      - otel-collector
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  trace-streamer:
+    build: ./trace-streamer
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+      - OTEL_COLLECTOR_GRPC=otel-collector:4317
+    depends_on:
+      - otel-collector
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    environment:
+      - VITE_BACKEND_URL=http://localhost:8080
+      - VITE_STREAMER_WS_URL=ws://localhost:8081/ws
+    depends_on:
+      - backend
+      - trace-streamer
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    command: ["--config=/etc/otel-collector.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otel-collector.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "55679:55679" # zpages
+
+  cockroachdb:
+    image: cockroachdb/cockroach:v23.2.0
+    command: start-single-node --insecure
+    ports:
+      - "26257:26257"
+      - "8082:8080"  # CockroachDB UI
+    volumes:
+      - cockroach-data:/cockroach/cockroach-data
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.55
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14250:14250"  # gRPC
+
+volumes:
+  cockroach-data:

@@ -1,0 +1,108 @@
+name: "App CI/CD"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/lucasnic
+
+jobs:
+  test-backend:
+    name: "Test Backend"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.22" }
+      - name: Test
+        working-directory: backend
+        run: go test ./... -v
+
+  test-streamer:
+    name: "Test Trace Streamer"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.22" }
+      - name: Test
+        working-directory: trace-streamer
+        run: go test ./... -v
+
+  test-frontend:
+    name: "Test Frontend"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: Install & Build
+        working-directory: frontend
+        run: npm ci && npm run build
+
+  build-and-push:
+    name: "Build & Push (${{ matrix.service }})"
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-streamer, test-frontend]
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service: [backend, trace-streamer, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}
+          tags: |
+            type=sha,prefix=,format=short
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.service }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  update-manifests:
+    name: "Update K8s Manifests"
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.MANIFEST_REPO_TOKEN }}
+          repository: LucasNic/multi-cloud-resilience-platform
+
+      - name: Update image tags in K8s base manifest
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          SHORT_SHA=${SHA::7}
+          sed -i "s|ghcr.io/lucasnic/backend:.*|ghcr.io/lucasnic/backend:${SHORT_SHA}|g" k8s/base/deployment.yaml
+          sed -i "s|ghcr.io/lucasnic/trace-streamer:.*|ghcr.io/lucasnic/trace-streamer:${SHORT_SHA}|g" k8s/base/deployment.yaml
+          sed -i "s|ghcr.io/lucasnic/frontend:.*|ghcr.io/lucasnic/frontend:${SHORT_SHA}|g" k8s/base/deployment.yaml
+
+      - name: Commit and push manifest update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/base/deployment.yaml
+          git commit -m "chore: update image tags to ${GITHUB_SHA::7}" || echo "no changes"
+          git push
