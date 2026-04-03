@@ -19,9 +19,10 @@ services:
     environment:
       - PORT=8080
       - DATABASE_URL=postgresql://root@cockroachdb:26257/appdb?sslmode=disable
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
       - OTEL_SERVICE_NAME=backend
       - CLUSTER_ROLE=local
+    restart: on-failure
     depends_on:
       - cockroachdb
       - otel-collector
@@ -67,15 +68,18 @@ services:
     command: start-single-node --insecure
     ports:
       - "26257:26257"
-      - "8082:8080"  # CockroachDB UI
+      - "8083:8080"  # CockroachDB UI
     volumes:
       - cockroach-data:/cockroach/cockroach-data
 
   jaeger:
     image: jaegertracing/all-in-one:1.55
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
     ports:
       - "16686:16686"  # Jaeger UI
-      - "14250:14250"  # gRPC
+      - "14250:14250"  # gRPC legacy
+      - "4319:4317"    # OTLP gRPC (host 4319 para não conflitar com otel-collector)
 
 volumes:
   cockroach-data:

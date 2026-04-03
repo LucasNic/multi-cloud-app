@@ -25,10 +25,11 @@ func Bootstrap(ctx context.Context) (func(context.Context) error, error) {
 		endpoint = "localhost:4317"
 	}
 
-	conn, err := grpc.DialContext(ctx, endpoint,
+	dialCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	conn, err := grpc.DialContext(dialCtx, endpoint,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
-		grpc.WithTimeout(5*time.Second),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to OTel Collector: %w", err)

@@ -1,3 +1,7 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
 receivers:
   otlp:
     protocols:
@@ -13,8 +17,8 @@ processors:
 
 exporters:
   # Local dev: export to Jaeger for trace inspection
-  jaeger:
-    endpoint: jaeger:14250
+  otlp/jaeger:
+    endpoint: jaeger:4317
     tls:
       insecure: true
 
@@ -29,8 +33,9 @@ exporters:
     verbosity: basic
 
 service:
+  extensions: [health_check]
   pipelines:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [jaeger, otlp/streamer, logging]
+      exporters: [otlp/jaeger, otlp/streamer, logging]

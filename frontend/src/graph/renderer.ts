@@ -1,5 +1,5 @@
 import * as d3 from "d3";
-import { Node, Edge, NODES, EDGES } from "./nodes";
+import { type Node, type Edge, NODES, EDGES } from "./nodes";
 
 // GraphRenderer manages the D3 SVG visualization.
 // It never generates data — it only reflects the state passed to it.
@@ -18,7 +18,7 @@ export class GraphRenderer {
   }
 
   private render(): void {
-    const { width, height } = (this.svg.node() as SVGSVGElement).getBoundingClientRect();
+    (this.svg.node() as SVGSVGElement).getBoundingClientRect();
 
     // Edges
     this.svg

@@ -22,3 +22,7 @@ dist/
 
 # Claude Code
 .claude/
+
+# Google Cloud SDK
+google-cloud-sdk/
+google-cloud-cli-*.tar.gz

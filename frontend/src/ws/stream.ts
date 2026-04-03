@@ -21,7 +21,8 @@ export class TraceStream {
   private callbacks: EventCallback[] = [];
   private reconnectDelay = 1000;
 
-  constructor(private url: string) {}
+  private url: string;
+  constructor(url: string) { this.url = url; }
 
   connect(): void {
     this.ws = new WebSocket(this.url);
