@@ -20,9 +20,10 @@ func main() {
 	// Bootstrap OpenTelemetry — all spans flow to OTel Collector
 	shutdown, err := telemetry.Bootstrap(ctx)
 	if err != nil {
-		log.Fatalf("failed to bootstrap telemetry: %v", err)
+		log.Printf("warning: telemetry bootstrap failed (spans will be dropped): %v", err)
+	} else {
+		defer shutdown(ctx)
 	}
-	defer shutdown(ctx)
 
 	// Database connection
 	database, err := db.Connect(os.Getenv("DATABASE_URL"))
