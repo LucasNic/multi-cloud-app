@@ -16,15 +16,15 @@ export interface Edge {
   state: "idle" | "active" | "error";
 }
 
-// Fixed layout — left to right, top to bottom
-// Matches the architecture: User → CDN → API → DB / Queue → Worker → DB
+// Fixed layout — left to right, branching at API
+// Matches the architecture: User → Cloudflare → API → DB / Queue → Worker → DB
 export const NODES: Node[] = [
-  { id: "user",    label: "User",       x: 80,  y: 200, state: "idle" },
-  { id: "cdn",     label: "Cloudflare", x: 220, y: 200, state: "idle" },
-  { id: "api",     label: "API (OKE)",  x: 400, y: 200, state: "idle" },
-  { id: "db",      label: "CockroachDB",x: 600, y: 120, state: "idle" },
-  { id: "queue",   label: "Queue",      x: 600, y: 280, state: "idle" },
-  { id: "worker",  label: "Worker",     x: 760, y: 280, state: "idle" },
+  { id: "user",    label: "User",        x: 60,  y: 140, state: "idle" },
+  { id: "cdn",     label: "Cloudflare",  x: 220, y: 140, state: "idle" },
+  { id: "api",     label: "API",         x: 400, y: 140, state: "idle" },
+  { id: "db",      label: "CockroachDB", x: 600, y: 60,  state: "idle" },
+  { id: "queue",   label: "Queue",       x: 600, y: 220, state: "idle" },
+  { id: "worker",  label: "Worker",      x: 760, y: 220, state: "idle" },
 ];
 
 export const EDGES: Edge[] = [

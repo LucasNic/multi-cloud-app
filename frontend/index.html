@@ -3,31 +3,153 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Multi-Cloud Resilience — Live Tracing</title>
+  <title>Multi-Cloud Resilience Platform</title>
   <link rel="stylesheet" href="/src/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 </head>
 <body>
+
+  <!-- Top bar -->
   <header>
-    <h1>Multi-Cloud Resilience Platform</h1>
-    <div id="cluster-badge">
-      <span class="label">Active cluster:</span>
-      <span id="cluster-name">connecting...</span>
+    <div class="header-left">
+      <div class="logo">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+          <path d="M2 17l10 5 10-5"/>
+          <path d="M2 12l10 5 10-5"/>
+        </svg>
+      </div>
+      <div class="header-title">
+        <h1>Multi-Cloud Resilience Platform</h1>
+        <span class="header-subtitle">Real-time distributed tracing &amp; failover visualization</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="status-indicators">
+        <div class="status-pill" id="ws-status">
+          <span class="status-dot"></span>
+          <span class="status-text">Connecting...</span>
+        </div>
+        <div class="status-pill" id="cluster-badge">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          <span id="cluster-name">discovering...</span>
+        </div>
+      </div>
     </div>
   </header>
 
   <main>
-    <section id="graph-container">
-      <svg id="graph"></svg>
+    <!-- Architecture graph — central feature -->
+    <section id="graph-panel">
+      <div class="panel-header">
+        <h2>Architecture Topology</h2>
+        <span class="badge badge-live" id="live-badge">LIVE</span>
+      </div>
+      <div id="graph-container">
+        <svg id="graph"></svg>
+      </div>
+      <div class="graph-legend">
+        <div class="legend-item"><span class="legend-dot idle"></span> Idle</div>
+        <div class="legend-item"><span class="legend-dot processing"></span> Processing</div>
+        <div class="legend-item"><span class="legend-dot success"></span> Success</div>
+        <div class="legend-item"><span class="legend-dot error"></span> Error</div>
+      </div>
     </section>
 
-    <aside id="controls">
-      <h2>Simulate</h2>
-      <button id="btn-request" class="btn primary">Standard Request</button>
-      <button id="btn-async" class="btn primary">Async Flow</button>
-      <button id="btn-fail" class="btn danger">Simulate Failure</button>
+    <!-- Right sidebar -->
+    <aside id="sidebar">
+      <!-- Simulate section -->
+      <div class="sidebar-section">
+        <div class="section-header">
+          <h2>Simulate Traffic</h2>
+          <span class="section-desc">Trigger real requests through the distributed pipeline</span>
+        </div>
 
-      <h2>Active Traces</h2>
-      <ul id="trace-list"></ul>
+        <div class="action-card" id="card-request">
+          <button id="btn-request" class="btn btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+            Standard Request
+          </button>
+          <p class="action-desc">
+            Sends a synchronous HTTP request through the full pipeline:
+            <strong>User &rarr; Cloudflare &rarr; API &rarr; CockroachDB</strong>.
+            Validates end-to-end latency and database connectivity.
+          </p>
+        </div>
+
+        <div class="action-card" id="card-async">
+          <button id="btn-async" class="btn btn-secondary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+            Async Flow
+          </button>
+          <p class="action-desc">
+            Enqueues an async job:
+            <strong>API &rarr; Queue &rarr; Worker &rarr; CockroachDB</strong>.
+            Demonstrates the event-driven pipeline with decoupled processing.
+          </p>
+        </div>
+
+        <div class="action-card" id="card-fail">
+          <button id="btn-fail" class="btn btn-danger">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            Simulate Failure
+          </button>
+          <p class="action-desc">
+            Forces an error to test observability. The span is marked as <code>ERROR</code>,
+            visible in the trace stream. Tests alerting and graph error-state rendering.
+          </p>
+        </div>
+      </div>
+
+      <!-- Metrics -->
+      <div class="sidebar-section">
+        <div class="section-header">
+          <h2>Metrics</h2>
+        </div>
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <span class="metric-value" id="metric-requests">0</span>
+            <span class="metric-label">Requests</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-value" id="metric-errors">0</span>
+            <span class="metric-label">Errors</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-value" id="metric-latency">—</span>
+            <span class="metric-label">Avg Latency</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-value" id="metric-spans">0</span>
+            <span class="metric-label">Spans</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Trace feed -->
+      <div class="sidebar-section traces-section">
+        <div class="section-header">
+          <h2>Active Traces</h2>
+          <span class="trace-count" id="trace-count">0 traces</span>
+        </div>
+        <ul id="trace-list"></ul>
+      </div>
+
+      <!-- Info footer -->
+      <div class="sidebar-footer">
+        <div class="tech-stack">
+          <span class="tech-tag">Go</span>
+          <span class="tech-tag">OpenTelemetry</span>
+          <span class="tech-tag">WebSocket</span>
+          <span class="tech-tag">AKS</span>
+          <span class="tech-tag">GKE</span>
+          <span class="tech-tag">CockroachDB</span>
+          <span class="tech-tag">Cloudflare</span>
+          <span class="tech-tag">Terraform</span>
+        </div>
+      </div>
     </aside>
   </main>
 

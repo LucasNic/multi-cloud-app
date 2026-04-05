@@ -5,6 +5,15 @@ import { type Node, type Edge, NODES, EDGES } from "./nodes";
 // It never generates data — it only reflects the state passed to it.
 // All state changes come from real WebSocket events (via main.ts).
 
+const NODE_ICONS: Record<string, string> = {
+  user: "\u{1F464}",      // 👤
+  cdn: "\u{1F310}",       // 🌐
+  api: "\u{2699}",        // ⚙
+  db: "\u{1F5C4}",        // 🗄
+  queue: "\u{1F4E8}",     // 📨
+  worker: "\u{26A1}",     // ⚡
+};
+
 export class GraphRenderer {
   private svg: d3.Selection<SVGSVGElement, unknown, HTMLElement, unknown>;
   private nodes: Node[];
@@ -14,11 +23,63 @@ export class GraphRenderer {
     this.svg = d3.select<SVGSVGElement, unknown>(svgSelector);
     this.nodes = NODES.map((n) => ({ ...n }));
     this.edges = EDGES.map((e) => ({ ...e }));
+    this.setupDefs();
     this.render();
+
+    // Re-render on resize to keep centered
+    const ro = new ResizeObserver(() => this.render());
+    const el = this.svg.node()?.parentElement;
+    if (el) ro.observe(el);
+  }
+
+  private setupDefs(): void {
+    const defs = this.svg.append("defs");
+
+    // Arrow markers
+    const markers = [
+      { id: "arrow-idle", color: "#1e293b" },
+      { id: "arrow-active", color: "#3b82f6" },
+      { id: "arrow-error", color: "#ef4444" },
+    ];
+
+    markers.forEach(({ id, color }) => {
+      defs
+        .append("marker")
+        .attr("id", id)
+        .attr("viewBox", "0 -5 10 10")
+        .attr("refX", 38)
+        .attr("refY", 0)
+        .attr("markerWidth", 6)
+        .attr("markerHeight", 6)
+        .attr("orient", "auto")
+        .append("path")
+        .attr("d", "M0,-5L10,0L0,5")
+        .attr("fill", color);
+    });
+
+    // Glow filter for active nodes
+    const glow = defs.append("filter").attr("id", "glow");
+    glow
+      .append("feGaussianBlur")
+      .attr("stdDeviation", "4")
+      .attr("result", "coloredBlur");
+    const merge = glow.append("feMerge");
+    merge.append("feMergeNode").attr("in", "coloredBlur");
+    merge.append("feMergeNode").attr("in", "SourceGraphic");
   }
 
   private render(): void {
-    (this.svg.node() as SVGSVGElement).getBoundingClientRect();
+    const container = this.svg.node()?.parentElement;
+    if (!container) return;
+
+    const { width, height } = container.getBoundingClientRect();
+    this.svg.attr("viewBox", `0 0 ${width} ${height}`);
+
+    // Center the graph
+    const graphWidth = 760;
+    const graphHeight = 280;
+    const offsetX = (width - graphWidth) / 2;
+    const offsetY = (height - graphHeight) / 2;
 
     // Edges
     this.svg
@@ -26,10 +87,17 @@ export class GraphRenderer {
       .data(this.edges, (d) => d.id)
       .join("line")
       .attr("class", (d) => `link ${d.state !== "idle" ? d.state : ""}`)
-      .attr("x1", (d) => this.nodeById(d.source)?.x ?? 0)
-      .attr("y1", (d) => this.nodeById(d.source)?.y ?? 0)
-      .attr("x2", (d) => this.nodeById(d.target)?.x ?? 0)
-      .attr("y2", (d) => this.nodeById(d.target)?.y ?? 0);
+      .attr("x1", (d) => offsetX + (this.nodeById(d.source)?.x ?? 0))
+      .attr("y1", (d) => offsetY + (this.nodeById(d.source)?.y ?? 0))
+      .attr("x2", (d) => offsetX + (this.nodeById(d.target)?.x ?? 0))
+      .attr("y2", (d) => offsetY + (this.nodeById(d.target)?.y ?? 0))
+      .attr("marker-end", (d) =>
+        d.state === "active"
+          ? "url(#arrow-active)"
+          : d.state === "error"
+          ? "url(#arrow-error)"
+          : "url(#arrow-idle)"
+      );
 
     // Nodes
     const nodeGroups = this.svg
@@ -37,31 +105,61 @@ export class GraphRenderer {
       .data(this.nodes, (d) => d.id)
       .join("g")
       .attr("class", (d) => `node state-${d.state}`)
-      .attr("transform", (d) => `translate(${d.x},${d.y})`);
+      .attr("transform", (d) => `translate(${offsetX + d.x},${offsetY + d.y})`);
 
+    // Outer glow ring (only for active states)
     nodeGroups
-      .selectAll("circle")
+      .selectAll<SVGCircleElement, Node>(".ring")
       .data((d) => [d])
       .join("circle")
-      .attr("r", 28);
+      .attr("class", "ring")
+      .attr("r", 36)
+      .attr("fill", "none")
+      .attr("stroke", (d) =>
+        d.state === "processing" ? "rgba(59,130,246,0.15)"
+        : d.state === "success" ? "rgba(34,197,94,0.15)"
+        : d.state === "error" ? "rgba(239,68,68,0.15)"
+        : "transparent"
+      )
+      .attr("stroke-width", 6);
 
+    // Main circle
     nodeGroups
-      .selectAll("text")
+      .selectAll<SVGCircleElement, Node>("circle.main")
+      .data((d) => [d])
+      .join("circle")
+      .attr("class", "main")
+      .attr("r", 30);
+
+    // Icon
+    nodeGroups
+      .selectAll<SVGTextElement, Node>(".node-icon")
       .data((d) => [d])
       .join("text")
+      .attr("class", "node-icon")
       .attr("dy", "0.35em")
-      .attr("y", 42)
+      .attr("text-anchor", "middle")
+      .attr("font-size", "18px")
+      .text((d) => NODE_ICONS[d.id] ?? "");
+
+    // Label
+    nodeGroups
+      .selectAll<SVGTextElement, Node>("text.label")
+      .data((d) => [d])
+      .join("text")
+      .attr("class", "label")
+      .attr("dy", "0.35em")
+      .attr("y", 48)
+      .attr("text-anchor", "middle")
       .text((d) => d.label);
   }
 
-  // Update a node's visual state
   setNodeState(nodeId: string, state: Node["state"]): void {
     const node = this.nodes.find((n) => n.id === nodeId);
     if (!node) return;
     node.state = state;
     this.render();
 
-    // Auto-reset to idle after animation completes
     if (state !== "idle") {
       setTimeout(() => {
         node.state = "idle";
@@ -70,7 +168,6 @@ export class GraphRenderer {
     }
   }
 
-  // Activate an edge (animate the flow arrow)
   setEdgeState(edgeId: string, state: Edge["state"]): void {
     const edge = this.edges.find((e) => e.id === edgeId);
     if (!edge) return;
@@ -85,12 +182,13 @@ export class GraphRenderer {
     }
   }
 
-  // Update the API node label to reflect which cluster is active
   setCluster(cluster: string): void {
     const apiNode = this.nodes.find((n) => n.id === "api");
     if (!apiNode) return;
-    const label = cluster === "oci" ? "API (OKE)" : cluster === "gcp" ? "API (GKE)" : "API";
-    apiNode.label = label;
+    apiNode.label =
+      cluster === "primary" ? "API (AKS)"
+      : cluster === "secondary" ? "API (GKE)"
+      : "API";
     this.render();
   }
 
