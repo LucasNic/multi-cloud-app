@@ -64,6 +64,7 @@ func main() {
 		api.POST("/fail", h.SimulateFailure)        // simulates failure for UI demonstration
 		api.POST("/simulate-down", h.SimulateDown)  // makes /healthz return 503 (triggers CF failover)
 		api.POST("/simulate-recover", h.SimulateRecover) // cancels simulated outage
+		api.POST("/trigger-recovery", h.TriggerRecovery) // recovers AKS + switches DNS back via Worker
 		api.GET("/events", h.StreamEvents)          // SSE stream of recent events
 		api.GET("/cluster", h.ClusterInfo)          // returns which cluster is serving
 	}

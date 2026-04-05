@@ -273,11 +273,85 @@ func (h *Handler) StreamEvents(c *gin.Context) {
 	c.JSON(http.StatusOK, events)
 }
 
-// ClusterInfo returns which cluster is currently serving the request.
+// ClusterInfo returns which cluster is currently serving and the state of all clusters.
 func (h *Handler) ClusterInfo(c *gin.Context) {
+	cluster := os.Getenv("CLUSTER_ROLE")
+	cloud := os.Getenv("CLOUD_PROVIDER")
+
+	type clusterState struct {
+		Name   string `json:"name"`
+		IsDown bool   `json:"is_down"`
+	}
+	var allClusters []clusterState
+
+	rows, err := h.db.QueryContext(c.Request.Context(),
+		"SELECT cluster, is_down, down_until FROM cluster_state",
+	)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			var isDown bool
+			var downUntil sql.NullTime
+			if rows.Scan(&name, &isDown, &downUntil) == nil {
+				if isDown && downUntil.Valid && time.Now().After(downUntil.Time) {
+					isDown = false
+					h.db.Exec("UPDATE cluster_state SET is_down = false WHERE cluster = $1", name)
+				}
+				allClusters = append(allClusters, clusterState{Name: name, IsDown: isDown})
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"cluster": os.Getenv("CLUSTER_ROLE"),
-		"cloud":   os.Getenv("CLOUD_PROVIDER"),
-		"healthy": !h.isDown(),
+		"cluster":      cluster,
+		"cloud":        cloud,
+		"healthy":      !h.isDown(),
+		"all_clusters": allClusters,
 	})
+}
+
+// TriggerRecovery recovers the primary cluster and calls the Worker to switch DNS back.
+func (h *Handler) TriggerRecovery(c *gin.Context) {
+	h.db.Exec(`
+		UPSERT INTO cluster_state (cluster, is_down, down_until, updated_at)
+		VALUES ('primary', false, NULL, now())
+	`)
+
+	go triggerWorkerRecovery()
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "recovery_triggered",
+		"message": "AKS recovery initiated — DNS switching back",
+	})
+}
+
+// triggerWorkerRecovery calls the Cloudflare Worker /recover endpoint
+// to switch DNS back to AKS.
+func triggerWorkerRecovery() {
+	workerURL := os.Getenv("WORKER_URL")
+	workerSecret := os.Getenv("WORKER_SECRET")
+	if workerURL == "" || workerSecret == "" {
+		log.Printf("[recovery] WORKER_URL or WORKER_SECRET not set — skipping")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "POST", workerURL+"/recover", nil)
+	if err != nil {
+		log.Printf("[recovery] failed to create request: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+workerSecret)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("[recovery] worker call failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	log.Printf("[recovery] worker response: %d", resp.StatusCode)
 }

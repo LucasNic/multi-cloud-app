@@ -748,6 +748,12 @@ main {
   border-color: rgba(245, 158, 11, 0.2);
 }
 
+.cluster-role-tag.danger {
+  background: var(--red-glow);
+  color: var(--red);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
 .btn-small {
   font-family: var(--font);
   font-size: 11px;
@@ -776,6 +782,24 @@ main {
 .btn-small-muted {
   background: var(--surface-2);
   color: var(--text-muted);
+}
+
+.btn-small-recover {
+  background: rgba(34, 197, 94, 0.1);
+  color: var(--green);
+}
+
+.btn-small-recover:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.2);
+}
+
+.btn-small-primary {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--blue);
+}
+
+.btn-small-primary:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.2);
 }
 
 .btn-recover {
