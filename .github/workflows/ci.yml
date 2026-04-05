@@ -80,8 +80,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VITE_BACKEND_URL=https://lucasnicoloso.com
-            VITE_STREAMER_WS_URL=wss://lucasnicoloso.com/ws
+            VITE_BACKEND_URL=https://app.lucasnicoloso.com
+            VITE_STREAMER_WS_URL=wss://app.lucasnicoloso.com/ws
 
   update-manifests:
     name: "Update K8s Manifests"
