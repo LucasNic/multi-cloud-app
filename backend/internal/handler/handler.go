@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,10 +17,25 @@ var tracer = otel.Tracer("backend/handler")
 
 type Handler struct {
 	db *sql.DB
+
+	// Simulated health state — toggled by /api/simulate-down
+	mu           sync.RWMutex
+	simulatedDown bool
+	downUntil     time.Time
 }
 
 func New(db *sql.DB) *Handler {
 	return &Handler{db: db}
+}
+
+// IsHealthy returns false when simulate-down is active.
+func (h *Handler) IsHealthy() bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.simulatedDown && time.Now().Before(h.downUntil) {
+		return false
+	}
+	return true
 }
 
 // HandleRequest simulates a standard flow: API → DB
@@ -107,6 +123,49 @@ func (h *Handler) SimulateFailure(c *gin.Context) {
 	})
 }
 
+// SimulateDown makes /healthz return 503 for the given duration (seconds).
+// This triggers the Cloudflare Worker failover after FAILURE_THRESHOLD consecutive checks.
+func (h *Handler) SimulateDown(c *gin.Context) {
+	var req struct {
+		DurationSec int `json:"duration_sec"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.DurationSec <= 0 {
+		req.DurationSec = 300 // default 5 minutes
+	}
+
+	h.mu.Lock()
+	h.simulatedDown = true
+	h.downUntil = time.Now().Add(time.Duration(req.DurationSec) * time.Second)
+	h.mu.Unlock()
+
+	_, span := tracer.Start(c.Request.Context(), "simulate_down")
+	span.SetAttributes(
+		attribute.Int("duration_sec", req.DurationSec),
+		attribute.String("cluster", os.Getenv("CLUSTER_ROLE")),
+	)
+	span.SetStatus(codes.Error, "cluster marked as down")
+	span.End()
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":       "down",
+		"cluster":      os.Getenv("CLUSTER_ROLE"),
+		"duration_sec": req.DurationSec,
+		"recovers_at":  h.downUntil.UTC().Format(time.RFC3339),
+	})
+}
+
+// SimulateRecover cancels a simulated outage immediately.
+func (h *Handler) SimulateRecover(c *gin.Context) {
+	h.mu.Lock()
+	h.simulatedDown = false
+	h.mu.Unlock()
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "recovered",
+		"cluster": os.Getenv("CLUSTER_ROLE"),
+	})
+}
+
 // StreamEvents returns recent events via Server-Sent Events (SSE).
 func (h *Handler) StreamEvents(c *gin.Context) {
 	rows, err := h.db.QueryContext(c.Request.Context(),
@@ -142,5 +201,6 @@ func (h *Handler) ClusterInfo(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"cluster": os.Getenv("CLUSTER_ROLE"),
 		"cloud":   os.Getenv("CLOUD_PROVIDER"),
+		"healthy": h.IsHealthy(),
 	})
 }

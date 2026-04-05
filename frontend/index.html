@@ -103,6 +103,49 @@
         </div>
       </div>
 
+      <!-- Failover control -->
+      <div class="sidebar-section">
+        <div class="section-header">
+          <h2>Failover Control</h2>
+          <span class="section-desc">Simulate outages and control cluster routing</span>
+        </div>
+
+        <div class="failover-status" id="failover-status">
+          <div class="cluster-row">
+            <div class="cluster-indicator">
+              <span class="cluster-dot healthy" id="azure-dot"></span>
+              <span class="cluster-label">Azure (AKS)</span>
+              <span class="cluster-role-tag" id="azure-role">primary</span>
+            </div>
+            <button class="btn-small btn-small-danger" id="btn-down-azure">Simulate Down</button>
+          </div>
+          <div class="cluster-row">
+            <div class="cluster-indicator">
+              <span class="cluster-dot standby" id="gcp-dot"></span>
+              <span class="cluster-label">GCP (GKE)</span>
+              <span class="cluster-role-tag secondary" id="gcp-role">standby</span>
+            </div>
+            <button class="btn-small btn-small-danger" id="btn-down-gcp" disabled>Simulate Down</button>
+          </div>
+        </div>
+
+        <button class="btn btn-recover" id="btn-recover" style="display:none;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Force Recovery
+        </button>
+
+        <div class="failover-info" id="failover-info" style="display:none;">
+          <div class="info-row">
+            <span class="info-label">Status</span>
+            <span class="info-value" id="failover-info-status">—</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Recovers at</span>
+            <span class="info-value" id="failover-info-recovery">—</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Metrics -->
       <div class="sidebar-section">
         <div class="section-header">

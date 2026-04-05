@@ -651,6 +651,191 @@ main {
   letter-spacing: 0.02em;
 }
 
+/* ─── Failover Control ───────────────────────────────────── */
+
+.failover-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.cluster-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.cluster-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cluster-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: all 0.3s var(--ease);
+}
+
+.cluster-dot.healthy {
+  background: var(--green);
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
+}
+
+.cluster-dot.standby {
+  background: var(--amber);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.3);
+}
+
+.cluster-dot.unhealthy {
+  background: var(--red);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+  animation: pulse-dot 1s ease-in-out infinite;
+}
+
+.cluster-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cluster-role-tag {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--green-glow);
+  color: var(--green);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.cluster-role-tag.secondary {
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--amber);
+  border-color: rgba(245, 158, 11, 0.2);
+}
+
+.btn-small {
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s var(--ease);
+}
+
+.btn-small:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-small-danger {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--red);
+}
+
+.btn-small-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.btn-recover {
+  background: var(--green-glow);
+  color: var(--green);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  margin-top: 8px;
+}
+
+.btn-recover:hover {
+  background: rgba(34, 197, 94, 0.2);
+}
+
+.failover-info {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.15);
+  border-radius: var(--radius-sm);
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+}
+
+.info-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.info-value {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* ─── Trace Latency ──────────────────────────────────────── */
+
+#trace-list li .trace-latency {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--cyan);
+  flex-shrink: 0;
+  min-width: 40px;
+  text-align: right;
+  transition: color 0.3s var(--ease);
+}
+
+#trace-list li.error .trace-latency {
+  color: var(--red);
+}
+
+.trace-latency.latency-updated {
+  animation: latency-pop 0.4s var(--ease);
+}
+
+@keyframes latency-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); color: var(--green); }
+  100% { transform: scale(1); }
+}
+
+/* ─── Button Latency Flash ───────────────────────────────── */
+
+.btn.latency-flash {
+  font-family: var(--font-mono) !important;
+  font-size: 15px !important;
+  letter-spacing: 0;
+}
+
+.btn-primary.latency-flash {
+  background: var(--green-soft) !important;
+}
+
+.btn-secondary.latency-flash {
+  background: var(--green-soft) !important;
+  color: white !important;
+}
+
+.btn-danger.latency-flash {
+  background: var(--red-soft) !important;
+  color: white !important;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    RESPONSIVE
    ═══════════════════════════════════════════════════════════════ */

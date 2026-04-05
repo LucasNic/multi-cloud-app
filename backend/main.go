@@ -35,25 +35,36 @@ func main() {
 		log.Fatalf("failed to run migrations: %v", err)
 	}
 
+	// Handler (owns simulated-down state)
+	h := handler.New(database)
+
 	// Router
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(otelgin.Middleware("backend")) // auto-instrument all routes
 
 	// Health endpoints — checked by Cloudflare Worker every minute
-	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	// /healthz respects simulated outage state for failover testing
+	r.GET("/healthz", func(c *gin.Context) {
+		if !h.IsHealthy() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "down", "simulated": true})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
 	r.GET("/readyz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	r.GET("/livez", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 
 	// App routes
-	h := handler.New(database)
 	api := r.Group("/api")
 	{
-		api.POST("/request", h.HandleRequest)   // triggers a traced flow: API → DB
-		api.POST("/async", h.HandleAsync)        // triggers async flow: API → queue → worker
-		api.POST("/fail", h.SimulateFailure)     // simulates failure for UI demonstration
-		api.GET("/events", h.StreamEvents)       // SSE stream of recent events
-		api.GET("/cluster", h.ClusterInfo)       // returns which cluster is serving (OCI/GCP)
+		api.POST("/request", h.HandleRequest)      // triggers a traced flow: API → DB
+		api.POST("/async", h.HandleAsync)           // triggers async flow: API → queue → worker
+		api.POST("/fail", h.SimulateFailure)        // simulates failure for UI demonstration
+		api.POST("/simulate-down", h.SimulateDown)  // makes /healthz return 503 (triggers CF failover)
+		api.POST("/simulate-recover", h.SimulateRecover) // cancels simulated outage
+		api.GET("/events", h.StreamEvents)          // SSE stream of recent events
+		api.GET("/cluster", h.ClusterInfo)          // returns which cluster is serving
 	}
 
 	port := os.Getenv("PORT")
