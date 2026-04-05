@@ -79,6 +79,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VITE_BACKEND_URL=https://lucasnicoloso.com
+            VITE_STREAMER_WS_URL=wss://lucasnicoloso.com/ws
 
   update-manifests:
     name: "Update K8s Manifests"
@@ -97,13 +100,13 @@ jobs:
         run: |
           SHORT_SHA=${SHA::7}
           sed -i "s|ghcr.io/lucasnic/backend:.*|ghcr.io/lucasnic/backend:${SHORT_SHA}|g" k8s/base/deployment.yaml
-          sed -i "s|ghcr.io/lucasnic/trace-streamer:.*|ghcr.io/lucasnic/trace-streamer:${SHORT_SHA}|g" k8s/base/deployment.yaml
-          sed -i "s|ghcr.io/lucasnic/frontend:.*|ghcr.io/lucasnic/frontend:${SHORT_SHA}|g" k8s/base/deployment.yaml
+          sed -i "s|ghcr.io/lucasnic/trace-streamer:.*|ghcr.io/lucasnic/trace-streamer:${SHORT_SHA}|g" k8s/base/trace-streamer.yaml
+          sed -i "s|ghcr.io/lucasnic/frontend:.*|ghcr.io/lucasnic/frontend:${SHORT_SHA}|g" k8s/base/frontend.yaml
 
       - name: Commit and push manifest update
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add k8s/base/deployment.yaml
+          git add k8s/base/deployment.yaml k8s/base/frontend.yaml k8s/base/trace-streamer.yaml
           git commit -m "chore: update image tags to ${GITHUB_SHA::7}" || echo "no changes"
           git push
