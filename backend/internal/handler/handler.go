@@ -1,7 +1,11 @@
 package handler
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
+	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -183,12 +187,47 @@ func (h *Handler) SimulateDown(c *gin.Context) {
 	span.SetStatus(codes.Error, "cluster marked as down")
 	span.End()
 
+	// Trigger the Cloudflare Worker immediately so DNS failover happens
+	// in seconds rather than waiting up to 4 minutes for the cron.
+	go triggerWorkerFailover()
+
 	c.JSON(http.StatusOK, gin.H{
 		"status":       "down",
 		"cluster":      cluster,
 		"duration_sec": req.DurationSec,
 		"recovers_at":  downUntil.UTC().Format(time.RFC3339),
 	})
+}
+
+// triggerWorkerFailover calls the Cloudflare Worker's HTTP /trigger endpoint
+// so DNS is updated immediately rather than waiting for the next cron run.
+func triggerWorkerFailover() {
+	workerURL := os.Getenv("WORKER_URL")
+	workerSecret := os.Getenv("WORKER_SECRET")
+	if workerURL == "" || workerSecret == "" {
+		log.Printf("[failover] WORKER_URL or WORKER_SECRET not set — skipping instant trigger")
+		return
+	}
+
+	body, _ := json.Marshal(map[string]bool{"force_check": true})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "POST", workerURL+"/trigger", bytes.NewReader(body))
+	if err != nil {
+		log.Printf("[failover] failed to create worker request: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+workerSecret)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("[failover] worker trigger failed: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	log.Printf("[failover] worker trigger response: %d", resp.StatusCode)
 }
 
 // SimulateRecover marks this cluster as healthy in the database.

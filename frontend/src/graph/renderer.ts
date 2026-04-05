@@ -11,10 +11,16 @@ const NODE_ICONS: Record<string, string> = {
   worker:     "\u{26A1}",
 };
 
+interface EdgeWithLatency extends Edge {
+  latencyMs?: number;
+}
+
 export class GraphRenderer {
   private svg: d3.Selection<SVGSVGElement, unknown, HTMLElement, unknown>;
   private nodes: Node[];
-  private edges: Edge[];
+  private edges: EdgeWithLatency[];
+  private offsetX = 0;
+  private offsetY = 0;
 
   constructor(svgSelector: string) {
     this.svg = d3.select<SVGSVGElement, unknown>(svgSelector);
@@ -32,9 +38,9 @@ export class GraphRenderer {
     const defs = this.svg.append("defs");
 
     const markers = [
-      { id: "arrow-idle", color: "#1e293b" },
+      { id: "arrow-idle",   color: "#1e293b" },
       { id: "arrow-active", color: "#3b82f6" },
-      { id: "arrow-error", color: "#ef4444" },
+      { id: "arrow-error",  color: "#ef4444" },
     ];
 
     markers.forEach(({ id, color }) => {
@@ -60,34 +66,76 @@ export class GraphRenderer {
     const { width, height } = container.getBoundingClientRect();
     this.svg.attr("viewBox", `0 0 ${width} ${height}`);
 
-    const graphWidth = 850;
+    const graphWidth = 870;
     const graphHeight = 310;
-    const offsetX = (width - graphWidth) / 2;
-    const offsetY = (height - graphHeight) / 2;
+    this.offsetX = (width - graphWidth) / 2;
+    this.offsetY = (height - graphHeight) / 2;
 
-    // Edges
+    this.renderEdges();
+    this.renderNodes();
+    this.renderEdgeLabels();
+  }
+
+  private renderEdges(): void {
     this.svg
-      .selectAll<SVGLineElement, Edge>(".link")
+      .selectAll<SVGLineElement, EdgeWithLatency>(".link")
       .data(this.edges, (d) => d.id)
       .join("line")
       .attr("class", (d) => `link ${d.state !== "idle" ? d.state : ""}`)
-      .attr("x1", (d) => offsetX + (this.nodeById(d.source)?.x ?? 0))
-      .attr("y1", (d) => offsetY + (this.nodeById(d.source)?.y ?? 0))
-      .attr("x2", (d) => offsetX + (this.nodeById(d.target)?.x ?? 0))
-      .attr("y2", (d) => offsetY + (this.nodeById(d.target)?.y ?? 0))
+      .attr("x1", (d) => this.offsetX + (this.nodeById(d.source)?.x ?? 0))
+      .attr("y1", (d) => this.offsetY + (this.nodeById(d.source)?.y ?? 0))
+      .attr("x2", (d) => this.offsetX + (this.nodeById(d.target)?.x ?? 0))
+      .attr("y2", (d) => this.offsetY + (this.nodeById(d.target)?.y ?? 0))
       .attr("marker-end", (d) =>
         d.state === "active" ? "url(#arrow-active)"
         : d.state === "error" ? "url(#arrow-error)"
         : "url(#arrow-idle)"
       );
+  }
 
-    // Nodes
+  private renderEdgeLabels(): void {
+    // Show latency label on active/error edges, hide on idle
+    this.svg
+      .selectAll<SVGTextElement, EdgeWithLatency>(".edge-latency")
+      .data(this.edges, (d) => d.id)
+      .join("text")
+      .attr("class", (d) => `edge-latency ${d.state !== "idle" ? "visible" : ""}`)
+      .attr("x", (d) => {
+        const src = this.nodeById(d.source);
+        const tgt = this.nodeById(d.target);
+        if (!src || !tgt) return 0;
+        return this.offsetX + (src.x + tgt.x) / 2;
+      })
+      .attr("y", (d) => {
+        const src = this.nodeById(d.source);
+        const tgt = this.nodeById(d.target);
+        if (!src || !tgt) return 0;
+        // Offset above the line
+        const midY = this.offsetY + (src.y + tgt.y) / 2;
+        return midY - 10;
+      })
+      .attr("text-anchor", "middle")
+      .attr("fill", (d) => d.state === "error" ? "#ef4444" : "#3b82f6")
+      .attr("font-size", "10px")
+      .attr("font-family", "'JetBrains Mono', monospace")
+      .attr("font-weight", "600")
+      .attr("pointer-events", "none")
+      .text((d) => {
+        if (d.state === "idle") return "";
+        if (d.latencyMs !== undefined && d.latencyMs > 0) {
+          return d.latencyMs < 1 ? "<1ms" : `${d.latencyMs}ms`;
+        }
+        return d.state === "active" ? "..." : "ERR";
+      });
+  }
+
+  private renderNodes(): void {
     const nodeGroups = this.svg
       .selectAll<SVGGElement, Node>(".node")
       .data(this.nodes, (d) => d.id)
       .join("g")
       .attr("class", (d) => `node state-${d.state}`)
-      .attr("transform", (d) => `translate(${offsetX + d.x},${offsetY + d.y})`);
+      .attr("transform", (d) => `translate(${this.offsetX + d.x},${this.offsetY + d.y})`);
 
     // Outer glow ring
     nodeGroups
@@ -99,9 +147,9 @@ export class GraphRenderer {
       .attr("fill", "none")
       .attr("stroke", (d) =>
         d.state === "processing" ? "rgba(59,130,246,0.15)"
-        : d.state === "success" ? "rgba(34,197,94,0.15)"
-        : d.state === "error" ? "rgba(239,68,68,0.15)"
-        : d.state === "down" ? "rgba(239,68,68,0.1)"
+        : d.state === "success"  ? "rgba(34,197,94,0.15)"
+        : d.state === "error"    ? "rgba(239,68,68,0.15)"
+        : d.state === "down"     ? "rgba(239,68,68,0.08)"
         : "transparent"
       )
       .attr("stroke-width", 6);
@@ -140,14 +188,12 @@ export class GraphRenderer {
   setNodeState(nodeId: string, state: Node["state"]): void {
     const node = this.nodes.find((n) => n.id === nodeId);
     if (!node) return;
-    // Don't override "down" state with transient animation states
     if (node.state === "down" && state !== "down" && state !== "idle") return;
     node.state = state;
     this.render();
 
     if (state !== "idle" && state !== "down") {
       setTimeout(() => {
-        // Only reset if not "down"
         if (node.state !== "down") {
           node.state = "idle";
           this.render();
@@ -156,21 +202,23 @@ export class GraphRenderer {
     }
   }
 
-  setEdgeState(edgeId: string, state: Edge["state"]): void {
+  // Activate an edge with optional latency label
+  setEdgeState(edgeId: string, state: Edge["state"], latencyMs?: number): void {
     const edge = this.edges.find((e) => e.id === edgeId);
     if (!edge) return;
     edge.state = state;
+    if (latencyMs !== undefined) edge.latencyMs = latencyMs;
     this.render();
 
     if (state !== "idle") {
       setTimeout(() => {
         edge.state = "idle";
+        edge.latencyMs = undefined;
         this.render();
-      }, 1200);
+      }, 1800);
     }
   }
 
-  // Mark a cluster's API node as down/up
   setClusterDown(clusterId: string, isDown: boolean): void {
     const node = this.nodes.find((n) => n.id === clusterId);
     if (!node) return;

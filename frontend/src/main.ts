@@ -74,7 +74,9 @@ stream.onEvent((event) => {
     : "processing";
 
   if (nodeId) graph.setNodeState(nodeId, nodeState);
-  if (edgeId) graph.setEdgeState(edgeId, event.status === "error" ? "error" : "active");
+  // Pass latency to edge so it shows ms label on the arrow
+  const latencyForEdge = event.duration_ms > 0 ? event.duration_ms : undefined;
+  if (edgeId) graph.setEdgeState(edgeId, event.status === "error" ? "error" : "active", latencyForEdge);
 
   totalSpans++;
   if (event.duration_ms > 0) latencies.push(event.duration_ms);
