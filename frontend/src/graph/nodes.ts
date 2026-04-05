@@ -23,13 +23,13 @@ export interface Edge {
 //                         AKS API ──→ Queue → Worker
 //
 export const NODES: Node[] = [
-  { id: "user",      label: "User",        x: 60,  y: 180, state: "idle" },
-  { id: "cdn",       label: "Cloudflare",  x: 210, y: 180, state: "idle" },
-  { id: "aks-api",   label: "API (AKS)",   x: 410, y: 110, state: "idle" },
-  { id: "gke-api",   label: "API (GKE)",   x: 410, y: 250, state: "idle" },
-  { id: "db",        label: "CockroachDB", x: 620, y: 180, state: "idle" },
-  { id: "queue",     label: "Queue",       x: 620, y: 60,  state: "idle" },
-  { id: "worker",    label: "Worker",      x: 790, y: 60,  state: "idle" },
+  { id: "user",      label: "User",                    x: 60,  y: 180, state: "idle" },
+  { id: "cdn",       label: "CDN (Cloudflare)",        x: 210, y: 180, state: "idle" },
+  { id: "aks-api",   label: "K8s API (Azure AKS)",     x: 410, y: 110, state: "idle" },
+  { id: "gke-api",   label: "K8s API (GCP GKE)",       x: 410, y: 250, state: "idle" },
+  { id: "db",        label: "PostgreSQL (CockroachDB)", x: 620, y: 180, state: "idle" },
+  { id: "queue",     label: "In-Memory Queue",          x: 620, y: 60,  state: "idle" },
+  { id: "worker",    label: "Async Worker (Go)",        x: 790, y: 60,  state: "idle" },
 ];
 
 export const EDGES: Edge[] = [
@@ -54,7 +54,6 @@ export function getEdgesForAction(action: string, activeCluster: string): string
     "handle_async":     ["user-cdn", `cdn-${prefix}`],
     "queue.enqueue":    [`${prefix}-queue`],
     "worker.process":   ["queue-worker"],
-    "simulate_failure": ["user-cdn", `cdn-${prefix}`],
   };
   return map[action] ?? [];
 }
@@ -74,7 +73,6 @@ export function getNodeForAction(action: string, activeCluster: string): string 
     "handle_async":     prefix,
     "queue.enqueue":    "queue",
     "worker.process":   "worker",
-    "simulate_failure": prefix,
   };
   return map[action];
 }

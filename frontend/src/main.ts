@@ -107,7 +107,7 @@ stream.onEvent((event) => {
   if (event.duration_ms > 0) latencies.push(event.duration_ms);
   if (latencies.length > 100) latencies = latencies.slice(-100);
 
-  const isRootAction = event.action === "handle_request" || event.action === "handle_async" || event.action === "simulate_failure";
+  const isRootAction = event.action === "handle_request" || event.action === "handle_async";
   if (isRootAction) totalRequests++;
   if (event.status === "error") totalErrors++;
 
@@ -260,7 +260,6 @@ function setupButton(id: string, endpoint: string, actionType: string): void {
 
 setupButton("btn-request", "/api/request", "Standard");
 setupButton("btn-async", "/api/async", "Async");
-setupButton("btn-fail", "/api/fail", "Failure");
 
 // --- Trace list ---
 const activeTraces = new Set<string>();
