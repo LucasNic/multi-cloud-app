@@ -21,14 +21,25 @@ func Connect(dsn string) (*sql.DB, error) {
 }
 
 func Migrate(db *sql.DB) error {
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS requests (
+	migrations := []string{
+		`CREATE TABLE IF NOT EXISTS requests (
 			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			trace_id   STRING NOT NULL,
 			status     STRING NOT NULL,
 			cluster    STRING NOT NULL,
 			created_at TIMESTAMPTZ DEFAULT now()
-		)
-	`)
-	return err
+		)`,
+		`CREATE TABLE IF NOT EXISTS cluster_state (
+			cluster    STRING PRIMARY KEY,
+			is_down    BOOL NOT NULL DEFAULT false,
+			down_until TIMESTAMPTZ,
+			updated_at TIMESTAMPTZ DEFAULT now()
+		)`,
+	}
+	for _, m := range migrations {
+		if _, err := db.Exec(m); err != nil {
+			return err
+		}
+	}
+	return nil
 }

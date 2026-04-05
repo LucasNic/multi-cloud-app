@@ -177,6 +177,13 @@ main {
   overflow: hidden;
 }
 
+#center-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 /* ─── Graph Panel ────────────────────────────────────────── */
 
 #graph-panel {
@@ -184,6 +191,7 @@ main {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 280px;
   background:
     radial-gradient(ellipse at 30% 50%, rgba(59, 130, 246, 0.03) 0%, transparent 70%),
     radial-gradient(ellipse at 70% 50%, rgba(168, 85, 247, 0.02) 0%, transparent 70%),
@@ -266,6 +274,7 @@ main {
 .legend-dot.processing { background: var(--blue); border-color: var(--blue); }
 .legend-dot.success    { background: var(--green); border-color: var(--green); }
 .legend-dot.error      { background: var(--red); border-color: var(--red); }
+.legend-dot.down       { background: #4b1113; border-color: var(--red); }
 
 /* ─── D3 Graph: Nodes ────────────────────────────────────── */
 
@@ -318,6 +327,21 @@ main {
   stroke: var(--red);
   filter: drop-shadow(0 0 14px rgba(239, 68, 68, 0.5));
   animation: node-pulse-red 0.6s ease-in-out infinite;
+}
+
+.node.state-down circle {
+  fill: #3b1113;
+  stroke: #7f1d1d;
+  stroke-dasharray: 4 3;
+  filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.2));
+}
+
+.node.state-down text.label {
+  fill: #7f1d1d;
+}
+
+.node.state-down .node-icon {
+  font-size: 16px;
 }
 
 @keyframes node-pulse-blue {
@@ -749,6 +773,11 @@ main {
   background: rgba(239, 68, 68, 0.2);
 }
 
+.btn-small-muted {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
 .btn-recover {
   background: var(--green-glow);
   color: var(--green);
@@ -834,6 +863,154 @@ main {
 .btn-danger.latency-flash {
   background: var(--red-soft) !important;
   color: white !important;
+}
+
+.btn.latency-flash-error {
+  font-family: var(--font-mono) !important;
+  font-size: 12px !important;
+  background: var(--red-soft) !important;
+  color: white !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   REQUEST HISTORY TABLE
+   ═══════════════════════════════════════════════════════════════ */
+
+#history-panel {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  min-height: 140px;
+  flex-shrink: 0;
+  background: var(--bg-subtle);
+}
+
+#history-panel .panel-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.history-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.history-table-wrap {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.history-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.history-table th {
+  background: var(--surface);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-table td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+.history-table tr:hover td {
+  background: var(--surface);
+}
+
+.history-table .row-error td {
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.history-table .row-error:hover td {
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.cell-time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.cell-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.cell-trace {
+  color: var(--text-muted);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.type-tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.type-standard {
+  background: var(--blue-glow);
+  color: var(--blue);
+}
+
+.type-async {
+  background: rgba(168, 85, 247, 0.12);
+  color: var(--purple);
+}
+
+.type-failure {
+  background: var(--red-glow);
+  color: var(--red);
+}
+
+.status-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.status-ok {
+  background: var(--green-glow);
+  color: var(--green);
+}
+
+.status-error {
+  background: var(--red-glow);
+  color: var(--red);
+}
+
+.empty-row td {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 20px;
 }
 
 /* ═══════════════════════════════════════════════════════════════

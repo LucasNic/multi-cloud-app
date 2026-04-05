@@ -1,12 +1,12 @@
-// Graph node definitions — each represents a service in the architecture.
-// Positions are fixed (not force-directed) for clarity and consistency.
+// Graph node definitions — dual-cluster architecture topology.
+// Shows both AKS (primary) and GKE (failover) paths.
 
 export interface Node {
   id: string;
   label: string;
   x: number;
   y: number;
-  state: "idle" | "processing" | "success" | "error";
+  state: "idle" | "processing" | "success" | "error" | "down";
 }
 
 export interface Edge {
@@ -16,44 +16,59 @@ export interface Edge {
   state: "idle" | "active" | "error";
 }
 
-// Fixed layout — left to right, branching at API
-// Matches the architecture: User → Cloudflare → API → DB / Queue → Worker → DB
+// Dual-cluster layout:
+//
+//   User → Cloudflare ──→ AKS API ──→ CockroachDB
+//                    └──→ GKE API ──↗
+//                         AKS API ──→ Queue → Worker
+//
 export const NODES: Node[] = [
-  { id: "user",    label: "User",        x: 60,  y: 140, state: "idle" },
-  { id: "cdn",     label: "Cloudflare",  x: 220, y: 140, state: "idle" },
-  { id: "api",     label: "API",         x: 400, y: 140, state: "idle" },
-  { id: "db",      label: "CockroachDB", x: 600, y: 60,  state: "idle" },
-  { id: "queue",   label: "Queue",       x: 600, y: 220, state: "idle" },
-  { id: "worker",  label: "Worker",      x: 760, y: 220, state: "idle" },
+  { id: "user",      label: "User",        x: 60,  y: 180, state: "idle" },
+  { id: "cdn",       label: "Cloudflare",  x: 210, y: 180, state: "idle" },
+  { id: "aks-api",   label: "API (AKS)",   x: 410, y: 110, state: "idle" },
+  { id: "gke-api",   label: "API (GKE)",   x: 410, y: 250, state: "idle" },
+  { id: "db",        label: "CockroachDB", x: 620, y: 180, state: "idle" },
+  { id: "queue",     label: "Queue",       x: 620, y: 60,  state: "idle" },
+  { id: "worker",    label: "Worker",      x: 790, y: 60,  state: "idle" },
 ];
 
 export const EDGES: Edge[] = [
-  { id: "user-cdn",    source: "user",   target: "cdn",    state: "idle" },
-  { id: "cdn-api",     source: "cdn",    target: "api",    state: "idle" },
-  { id: "api-db",      source: "api",    target: "db",     state: "idle" },
-  { id: "api-queue",   source: "api",    target: "queue",  state: "idle" },
-  { id: "queue-worker",source: "queue",  target: "worker", state: "idle" },
-  { id: "worker-db",   source: "worker", target: "db",     state: "idle" },
+  { id: "user-cdn",      source: "user",    target: "cdn",     state: "idle" },
+  { id: "cdn-aks",       source: "cdn",     target: "aks-api", state: "idle" },
+  { id: "cdn-gke",       source: "cdn",     target: "gke-api", state: "idle" },
+  { id: "aks-db",        source: "aks-api", target: "db",      state: "idle" },
+  { id: "gke-db",        source: "gke-api", target: "db",      state: "idle" },
+  { id: "aks-queue",     source: "aks-api", target: "queue",   state: "idle" },
+  { id: "queue-worker",  source: "queue",   target: "worker",  state: "idle" },
+  { id: "worker-db",     source: "worker",  target: "db",      state: "idle" },
 ];
 
-// Maps OTel span action names to the edge that should animate
-export const ACTION_TO_EDGE: Record<string, string> = {
-  "handle_request":  "cdn-api",
-  "db.query":        "api-db",
-  "db.write":        "worker-db",
-  "handle_async":    "cdn-api",
-  "queue.enqueue":   "api-queue",
-  "worker.process":  "queue-worker",
-  "simulate_failure":"cdn-api",
-};
+// Maps OTel span actions → edges (uses active cluster prefix)
+export function getEdgeForAction(action: string, activeCluster: string): string | undefined {
+  const prefix = activeCluster === "primary" ? "aks" : "gke";
+  const map: Record<string, string> = {
+    "handle_request":   `cdn-${prefix}`,
+    "db.query":         `${prefix}-db`,
+    "db.write":         "worker-db",
+    "handle_async":     `cdn-${prefix}`,
+    "queue.enqueue":    `${prefix}-queue`,
+    "worker.process":   "queue-worker",
+    "simulate_failure": `cdn-${prefix}`,
+  };
+  return map[action];
+}
 
-// Maps OTel span action names to the node that should highlight
-export const ACTION_TO_NODE: Record<string, string> = {
-  "handle_request":  "api",
-  "db.query":        "db",
-  "db.write":        "db",
-  "handle_async":    "api",
-  "queue.enqueue":   "queue",
-  "worker.process":  "worker",
-  "simulate_failure":"api",
-};
+// Maps OTel span actions → nodes (uses active cluster prefix)
+export function getNodeForAction(action: string, activeCluster: string): string | undefined {
+  const prefix = activeCluster === "primary" ? "aks-api" : "gke-api";
+  const map: Record<string, string> = {
+    "handle_request":   prefix,
+    "db.query":         "db",
+    "db.write":         "db",
+    "handle_async":     prefix,
+    "queue.enqueue":    "queue",
+    "worker.process":   "worker",
+    "simulate_failure": prefix,
+  };
+  return map[action];
+}

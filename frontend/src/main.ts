@@ -1,18 +1,32 @@
 import { TraceStream } from "./ws/stream";
 import { GraphRenderer } from "./graph/renderer";
-import { ACTION_TO_EDGE, ACTION_TO_NODE } from "./graph/nodes";
+import { getEdgeForAction, getNodeForAction } from "./graph/nodes";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8080";
 const STREAMER_WS  = import.meta.env.VITE_STREAMER_WS_URL ?? "ws://localhost:8081/ws";
 
-// --- Metrics state ---
+// --- State ---
 let totalRequests = 0;
 let totalErrors = 0;
 let totalSpans = 0;
 let latencies: number[] = [];
+let activeCluster = "primary"; // "primary" = aks, "secondary" = gke
+// clusterIsDown state is managed by updateFailoverUI
+
+interface RequestRecord {
+  timestamp: Date;
+  type: string;
+  traceId: string;
+  latencyMs: number;
+  status: "success" | "error";
+  cluster: string;
+  error?: string;
+}
+const requestHistory: RequestRecord[] = [];
+
+function el(id: string): HTMLElement | null { return document.getElementById(id); }
 
 function updateMetrics(): void {
-  const el = (id: string) => document.getElementById(id);
   el("metric-requests")!.textContent = totalRequests.toLocaleString();
   el("metric-errors")!.textContent = totalErrors.toLocaleString();
   el("metric-spans")!.textContent = totalSpans.toLocaleString();
@@ -31,7 +45,6 @@ const stream = new TraceStream(STREAMER_WS);
 const wsStatus = document.getElementById("ws-status")!;
 const wsText = wsStatus.querySelector(".status-text")!;
 
-// Patch stream to track connection status
 const origConnect = stream.connect.bind(stream);
 stream.connect = function () {
   origConnect();
@@ -48,18 +61,13 @@ stream.connect = function () {
   }
 };
 
-// Ignore health/readiness spans to keep UI clean
 const IGNORE_ACTIONS = new Set(["/healthz", "/readyz", "/livez", "/health"]);
 
-// Track per-trace latency info (first request span → total latency)
-const traceLatency = new Map<string, number>();
-
 stream.onEvent((event) => {
-  // Skip k8s probe noise
   if (IGNORE_ACTIONS.has(event.action)) return;
 
-  const nodeId = ACTION_TO_NODE[event.action];
-  const edgeId = ACTION_TO_EDGE[event.action];
+  const nodeId = getNodeForAction(event.action, activeCluster);
+  const edgeId = getEdgeForAction(event.action, activeCluster);
 
   const nodeState = event.status === "error" ? "error"
     : event.duration_ms > 0 ? "success"
@@ -68,22 +76,13 @@ stream.onEvent((event) => {
   if (nodeId) graph.setNodeState(nodeId, nodeState);
   if (edgeId) graph.setEdgeState(edgeId, event.status === "error" ? "error" : "active");
 
-  // Update metrics
   totalSpans++;
   if (event.duration_ms > 0) latencies.push(event.duration_ms);
   if (latencies.length > 100) latencies = latencies.slice(-100);
 
-  // Track per-trace latency from the root span
   const isRootAction = event.action === "handle_request" || event.action === "handle_async" || event.action === "simulate_failure";
-  if (isRootAction) {
-    totalRequests++;
-    if (event.duration_ms > 0) {
-      traceLatency.set(event.trace_id, event.duration_ms);
-    }
-  }
-  if (event.status === "error") {
-    totalErrors++;
-  }
+  if (isRootAction) totalRequests++;
+  if (event.status === "error") totalErrors++;
 
   updateMetrics();
   addTraceToList(event.trace_id, event.action, event.status === "error", event.duration_ms);
@@ -96,17 +95,18 @@ async function updateClusterInfo(): Promise<void> {
   try {
     const res = await fetch(`${BACKEND_URL}/api/cluster`);
     const data = await res.json();
-    const badge = document.getElementById("cluster-name");
+    const badge = el("cluster-name");
     if (badge) {
       const cluster = data.cluster || "unknown";
       const cloud = data.cloud || "";
       badge.textContent = cloud ? `${cluster} (${cloud})` : cluster;
       badge.style.color = cloud === "azure" ? "#3b82f6" : cloud === "gcp" ? "#22c55e" : "#f1f5f9";
     }
-    graph.setCluster(data.cluster);
-    updateFailoverUI(data.healthy !== false);
+    activeCluster = data.cluster || "primary";
+    const healthy = data.healthy !== false;
+    updateFailoverUI(healthy);
   } catch {
-    const badge = document.getElementById("cluster-name");
+    const badge = el("cluster-name");
     if (badge) {
       badge.textContent = "unreachable";
       badge.style.color = "#ef4444";
@@ -116,32 +116,29 @@ async function updateClusterInfo(): Promise<void> {
 }
 
 updateClusterInfo();
-setInterval(updateClusterInfo, 5_000);
+setInterval(updateClusterInfo, 3_000);
 
-// --- Failover control ---
+// --- Failover UI ---
 function updateFailoverUI(healthy: boolean): void {
-  const azureDot = document.getElementById("azure-dot");
-  const btnRecover = document.getElementById("btn-recover");
-  const failoverInfo = document.getElementById("failover-info");
-  const btnDown = document.getElementById("btn-down-azure") as HTMLButtonElement;
+  const azureDot = el("azure-dot");
+  const btnRecover = el("btn-recover");
+  const failoverInfo = el("failover-info");
+  const btnDown = el("btn-down-azure") as HTMLButtonElement | null;
 
-  if (azureDot) {
-    azureDot.className = healthy ? "cluster-dot healthy" : "cluster-dot unhealthy";
-  }
-  if (btnRecover) {
-    btnRecover.style.display = healthy ? "none" : "flex";
-  }
-  if (failoverInfo) {
-    failoverInfo.style.display = healthy ? "none" : "block";
-  }
+  const apiNodeId = activeCluster === "primary" ? "aks-api" : "gke-api";
+  graph.setClusterDown(apiNodeId, !healthy);
+
+  if (azureDot) azureDot.className = healthy ? "cluster-dot healthy" : "cluster-dot unhealthy";
+  if (btnRecover) btnRecover.style.display = healthy ? "none" : "flex";
+  if (failoverInfo) failoverInfo.style.display = healthy ? "none" : "block";
   if (btnDown) {
-    btnDown.textContent = healthy ? "Simulate Down" : "Down (simulated)";
+    btnDown.textContent = healthy ? "Simulate Down" : "DOWN";
     btnDown.disabled = !healthy;
   }
 }
 
-document.getElementById("btn-down-azure")?.addEventListener("click", async () => {
-  const btn = document.getElementById("btn-down-azure") as HTMLButtonElement;
+el("btn-down-azure")?.addEventListener("click", async () => {
+  const btn = el("btn-down-azure") as HTMLButtonElement;
   btn.disabled = true;
   btn.textContent = "Triggering...";
 
@@ -153,12 +150,11 @@ document.getElementById("btn-down-azure")?.addEventListener("click", async () =>
     });
     const data = await res.json();
 
-    const infoStatus = document.getElementById("failover-info-status");
-    const infoRecovery = document.getElementById("failover-info-recovery");
+    const infoStatus = el("failover-info-status");
+    const infoRecovery = el("failover-info-recovery");
     if (infoStatus) infoStatus.textContent = "Simulated outage active";
     if (infoRecovery && data.recovers_at) {
-      const t = new Date(data.recovers_at);
-      infoRecovery.textContent = t.toLocaleTimeString();
+      infoRecovery.textContent = new Date(data.recovers_at).toLocaleTimeString();
     }
 
     updateFailoverUI(false);
@@ -169,7 +165,7 @@ document.getElementById("btn-down-azure")?.addEventListener("click", async () =>
   }
 });
 
-document.getElementById("btn-recover")?.addEventListener("click", async () => {
+el("btn-recover")?.addEventListener("click", async () => {
   try {
     await fetch(`${BACKEND_URL}/api/simulate-recover`, { method: "POST" });
     updateFailoverUI(true);
@@ -178,44 +174,66 @@ document.getElementById("btn-recover")?.addEventListener("click", async () => {
   }
 });
 
-// --- Button handlers with loading state and latency measurement ---
-function setupButton(id: string, endpoint: string): void {
-  const btn = document.getElementById(id);
+// --- Button handlers ---
+function setupButton(id: string, endpoint: string, actionType: string): void {
+  const btn = el(id);
   if (!btn) return;
 
   btn.addEventListener("click", async () => {
     btn.classList.add("loading");
     const start = performance.now();
+    let record: RequestRecord;
+
     try {
       const res = await fetch(`${BACKEND_URL}${endpoint}`, { method: "POST" });
       const elapsed = Math.round(performance.now() - start);
       const data = await res.json();
+      const isError = !res.ok;
 
-      // Flash the latency on the button
-      const origText = btn.textContent;
-      btn.textContent = `${elapsed}ms`;
+      record = {
+        timestamp: new Date(),
+        type: actionType,
+        traceId: data.trace_id || "—",
+        latencyMs: elapsed,
+        status: isError ? "error" : "success",
+        cluster: data.cluster || activeCluster,
+        error: isError ? (data.error || `HTTP ${res.status}`) : undefined,
+      };
+
+      // Flash latency on button
+      const origHTML = btn.innerHTML;
+      btn.textContent = isError ? `ERROR ${elapsed}ms` : `${elapsed}ms`;
       btn.classList.remove("loading");
-      btn.classList.add("latency-flash");
+      btn.classList.add(isError ? "latency-flash-error" : "latency-flash");
       setTimeout(() => {
-        btn.textContent = origText;
-        btn.classList.remove("latency-flash");
+        btn.innerHTML = origHTML;
+        btn.classList.remove("latency-flash", "latency-flash-error");
       }, 1200);
 
-      // Store client-side E2E latency
-      if (data.trace_id) {
-        traceLatency.set(data.trace_id, elapsed);
-        updateTraceLatency(data.trace_id, elapsed);
-      }
     } catch (e) {
-      console.error(`[${id}] request failed`, e);
+      const elapsed = Math.round(performance.now() - start);
+      record = {
+        timestamp: new Date(),
+        type: actionType,
+        traceId: "—",
+        latencyMs: elapsed,
+        status: "error",
+        cluster: activeCluster,
+        error: "Network error",
+      };
       btn.classList.remove("loading");
     }
+
+    // Add to history
+    requestHistory.unshift(record);
+    if (requestHistory.length > 50) requestHistory.pop();
+    renderRequestHistory();
   });
 }
 
-setupButton("btn-request", "/api/request");
-setupButton("btn-async", "/api/async");
-setupButton("btn-fail", "/api/fail");
+setupButton("btn-request", "/api/request", "Standard");
+setupButton("btn-async", "/api/async", "Async");
+setupButton("btn-fail", "/api/fail", "Failure");
 
 // --- Trace list ---
 const activeTraces = new Set<string>();
@@ -224,12 +242,10 @@ function addTraceToList(traceId: string, action: string, isError: boolean, durat
   if (activeTraces.has(traceId)) return;
   activeTraces.add(traceId);
 
-  const list = document.getElementById("trace-list");
+  const list = el("trace-list");
   if (!list) return;
 
-  // Use stored client E2E latency if available, otherwise span duration
-  const latency = traceLatency.get(traceId) ?? durationMs;
-  const latencyText = latency > 0 ? `${Math.round(latency)}ms` : "...";
+  const latencyText = durationMs > 0 ? `${Math.round(durationMs)}ms` : "...";
 
   const li = document.createElement("li");
   li.id = `trace-${traceId}`;
@@ -244,22 +260,32 @@ function addTraceToList(traceId: string, action: string, isError: boolean, durat
   li.title = traceId;
   list.prepend(li);
 
-  // Keep list short
   while (list.children.length > 20) {
     list.removeChild(list.lastChild!);
   }
 
-  // Update count
-  const count = document.getElementById("trace-count");
+  const count = el("trace-count");
   if (count) count.textContent = `${activeTraces.size} traces`;
 }
 
-function updateTraceLatency(traceId: string, latencyMs: number): void {
-  const li = document.getElementById(`trace-${traceId}`);
-  if (!li) return;
-  const latencyEl = li.querySelector(".trace-latency");
-  if (latencyEl) {
-    latencyEl.textContent = `${Math.round(latencyMs)}ms`;
-    latencyEl.classList.add("latency-updated");
-  }
+// --- Request History ---
+function renderRequestHistory(): void {
+  const tbody = el("request-history-body");
+  if (!tbody) return;
+
+  tbody.innerHTML = requestHistory.map((r) => {
+    const statusClass = r.status === "error" ? "status-error" : "status-ok";
+    const statusText = r.status === "error" ? (r.error || "error") : "ok";
+    const time = r.timestamp.toLocaleTimeString();
+    return `<tr class="${r.status === "error" ? "row-error" : ""}">
+      <td class="cell-time">${time}</td>
+      <td><span class="type-tag type-${r.type.toLowerCase()}">${r.type}</span></td>
+      <td class="cell-mono">${r.latencyMs}ms</td>
+      <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+      <td class="cell-mono cell-trace">${r.traceId === "—" ? "—" : r.traceId.slice(0, 12) + "..."}</td>
+    </tr>`;
+  }).join("");
+
+  const countEl = el("history-count");
+  if (countEl) countEl.textContent = `${requestHistory.length} requests`;
 }

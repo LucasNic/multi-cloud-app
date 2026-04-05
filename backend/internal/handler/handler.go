@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"net/http"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,29 +16,43 @@ var tracer = otel.Tracer("backend/handler")
 
 type Handler struct {
 	db *sql.DB
-
-	// Simulated health state — toggled by /api/simulate-down
-	mu           sync.RWMutex
-	simulatedDown bool
-	downUntil     time.Time
 }
 
 func New(db *sql.DB) *Handler {
 	return &Handler{db: db}
 }
 
-// IsHealthy returns false when simulate-down is active.
-func (h *Handler) IsHealthy() bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	if h.simulatedDown && time.Now().Before(h.downUntil) {
+// isDown checks if this cluster is in simulated-down state (DB-backed, shared across all pods).
+func (h *Handler) isDown() bool {
+	cluster := os.Getenv("CLUSTER_ROLE")
+	if cluster == "" {
+		return false
+	}
+	var isDown bool
+	var downUntil sql.NullTime
+	err := h.db.QueryRow(
+		"SELECT is_down, down_until FROM cluster_state WHERE cluster = $1", cluster,
+	).Scan(&isDown, &downUntil)
+	if err != nil {
+		return false // no row = not down
+	}
+	if !isDown {
+		return false
+	}
+	// Auto-recover if down_until has passed
+	if downUntil.Valid && time.Now().After(downUntil.Time) {
+		h.db.Exec("UPDATE cluster_state SET is_down = false WHERE cluster = $1", cluster)
 		return false
 	}
 	return true
 }
 
+// IsHealthy is called by the /healthz endpoint in main.go.
+func (h *Handler) IsHealthy() bool {
+	return !h.isDown()
+}
+
 // HandleRequest simulates a standard flow: API → DB
-// This is the primary scenario visualized in the frontend.
 func (h *Handler) HandleRequest(c *gin.Context) {
 	ctx, span := tracer.Start(c.Request.Context(), "handle_request")
 	defer span.End()
@@ -47,9 +60,20 @@ func (h *Handler) HandleRequest(c *gin.Context) {
 	cluster := os.Getenv("CLUSTER_ROLE")
 	span.SetAttributes(attribute.String("cluster", cluster))
 
-	// Simulate DB query with its own span
+	// Check if cluster is simulated-down
+	if h.isDown() {
+		span.SetStatus(codes.Error, "cluster is down (simulated)")
+		span.SetAttributes(attribute.Bool("simulated_outage", true))
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "cluster is down (simulated outage)",
+			"cluster": cluster,
+		})
+		return
+	}
+
+	// DB query span
 	dbCtx, dbSpan := tracer.Start(ctx, "db.query")
-	time.Sleep(50 * time.Millisecond) // realistic DB latency
+	time.Sleep(50 * time.Millisecond)
 	_, err := h.db.ExecContext(dbCtx,
 		"INSERT INTO requests (trace_id, status, cluster) VALUES ($1, $2, $3)",
 		span.SpanContext().TraceID().String(), "success", cluster,
@@ -81,19 +105,25 @@ func (h *Handler) HandleAsync(c *gin.Context) {
 		attribute.String("flow", "async"),
 	)
 
-	// Simulate enqueue
+	if h.isDown() {
+		span.SetStatus(codes.Error, "cluster is down (simulated)")
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "cluster is down (simulated outage)",
+			"cluster": cluster,
+		})
+		return
+	}
+
 	_, queueSpan := tracer.Start(ctx, "queue.enqueue")
 	time.Sleep(20 * time.Millisecond)
 	queueSpan.SetAttributes(attribute.String("queue", "requests"))
 	queueSpan.End()
 
-	// Simulate async worker processing
 	_, workerSpan := tracer.Start(ctx, "worker.process")
 	time.Sleep(80 * time.Millisecond)
 	workerSpan.SetAttributes(attribute.String("worker", "request-processor"))
 	workerSpan.End()
 
-	// Simulate DB write from worker
 	_, dbSpan := tracer.Start(ctx, "db.write")
 	time.Sleep(40 * time.Millisecond)
 	dbSpan.End()
@@ -106,7 +136,6 @@ func (h *Handler) HandleAsync(c *gin.Context) {
 }
 
 // SimulateFailure simulates a failure scenario for UI demonstration.
-// This triggers the failure visualization in the frontend.
 func (h *Handler) SimulateFailure(c *gin.Context) {
 	_, span := tracer.Start(c.Request.Context(), "simulate_failure")
 	defer span.End()
@@ -123,50 +152,60 @@ func (h *Handler) SimulateFailure(c *gin.Context) {
 	})
 }
 
-// SimulateDown makes /healthz return 503 for the given duration (seconds).
-// This triggers the Cloudflare Worker failover after FAILURE_THRESHOLD consecutive checks.
+// SimulateDown marks this cluster as "down" in the database.
+// All pods sharing the DB will see it and start returning 503.
 func (h *Handler) SimulateDown(c *gin.Context) {
 	var req struct {
 		DurationSec int `json:"duration_sec"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.DurationSec <= 0 {
-		req.DurationSec = 300 // default 5 minutes
+		req.DurationSec = 300
 	}
 
-	h.mu.Lock()
-	h.simulatedDown = true
-	h.downUntil = time.Now().Add(time.Duration(req.DurationSec) * time.Second)
-	h.mu.Unlock()
+	cluster := os.Getenv("CLUSTER_ROLE")
+	downUntil := time.Now().Add(time.Duration(req.DurationSec) * time.Second)
+
+	_, err := h.db.Exec(`
+		UPSERT INTO cluster_state (cluster, is_down, down_until, updated_at)
+		VALUES ($1, true, $2, now())
+	`, cluster, downUntil)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	_, span := tracer.Start(c.Request.Context(), "simulate_down")
 	span.SetAttributes(
 		attribute.Int("duration_sec", req.DurationSec),
-		attribute.String("cluster", os.Getenv("CLUSTER_ROLE")),
+		attribute.String("cluster", cluster),
 	)
 	span.SetStatus(codes.Error, "cluster marked as down")
 	span.End()
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":       "down",
-		"cluster":      os.Getenv("CLUSTER_ROLE"),
+		"cluster":      cluster,
 		"duration_sec": req.DurationSec,
-		"recovers_at":  h.downUntil.UTC().Format(time.RFC3339),
+		"recovers_at":  downUntil.UTC().Format(time.RFC3339),
 	})
 }
 
-// SimulateRecover cancels a simulated outage immediately.
+// SimulateRecover marks this cluster as healthy in the database.
 func (h *Handler) SimulateRecover(c *gin.Context) {
-	h.mu.Lock()
-	h.simulatedDown = false
-	h.mu.Unlock()
+	cluster := os.Getenv("CLUSTER_ROLE")
+	h.db.Exec(`
+		UPSERT INTO cluster_state (cluster, is_down, down_until, updated_at)
+		VALUES ($1, false, NULL, now())
+	`, cluster)
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "recovered",
-		"cluster": os.Getenv("CLUSTER_ROLE"),
+		"cluster": cluster,
 	})
 }
 
-// StreamEvents returns recent events via Server-Sent Events (SSE).
+// StreamEvents returns recent request events from the database.
 func (h *Handler) StreamEvents(c *gin.Context) {
 	rows, err := h.db.QueryContext(c.Request.Context(),
 		"SELECT trace_id, status, cluster, created_at FROM requests ORDER BY created_at DESC LIMIT 50",
@@ -196,11 +235,10 @@ func (h *Handler) StreamEvents(c *gin.Context) {
 }
 
 // ClusterInfo returns which cluster is currently serving the request.
-// Used by the frontend to show the active cloud.
 func (h *Handler) ClusterInfo(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"cluster": os.Getenv("CLUSTER_ROLE"),
 		"cloud":   os.Getenv("CLOUD_PROVIDER"),
-		"healthy": h.IsHealthy(),
+		"healthy": !h.isDown(),
 	})
 }

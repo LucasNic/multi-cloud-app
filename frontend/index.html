@@ -41,22 +41,50 @@
   </header>
 
   <main>
-    <!-- Architecture graph — central feature -->
-    <section id="graph-panel">
-      <div class="panel-header">
-        <h2>Architecture Topology</h2>
-        <span class="badge badge-live" id="live-badge">LIVE</span>
-      </div>
-      <div id="graph-container">
-        <svg id="graph"></svg>
-      </div>
-      <div class="graph-legend">
-        <div class="legend-item"><span class="legend-dot idle"></span> Idle</div>
-        <div class="legend-item"><span class="legend-dot processing"></span> Processing</div>
-        <div class="legend-item"><span class="legend-dot success"></span> Success</div>
-        <div class="legend-item"><span class="legend-dot error"></span> Error</div>
-      </div>
-    </section>
+    <!-- Left: Graph + Request History -->
+    <div id="center-content">
+      <!-- Architecture graph -->
+      <section id="graph-panel">
+        <div class="panel-header">
+          <h2>Architecture Topology</h2>
+          <span class="badge badge-live" id="live-badge">LIVE</span>
+        </div>
+        <div id="graph-container">
+          <svg id="graph"></svg>
+        </div>
+        <div class="graph-legend">
+          <div class="legend-item"><span class="legend-dot idle"></span> Idle</div>
+          <div class="legend-item"><span class="legend-dot processing"></span> Processing</div>
+          <div class="legend-item"><span class="legend-dot success"></span> Success</div>
+          <div class="legend-item"><span class="legend-dot error"></span> Error</div>
+          <div class="legend-item"><span class="legend-dot down"></span> Down</div>
+        </div>
+      </section>
+
+      <!-- Request History -->
+      <section id="history-panel">
+        <div class="panel-header">
+          <h2>Request History</h2>
+          <span class="history-count" id="history-count">0 requests</span>
+        </div>
+        <div class="history-table-wrap">
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Type</th>
+                <th>Latency</th>
+                <th>Status</th>
+                <th>Trace ID</th>
+              </tr>
+            </thead>
+            <tbody id="request-history-body">
+              <tr class="empty-row"><td colspan="5">Click a button above to send requests</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
 
     <!-- Right sidebar -->
     <aside id="sidebar">
@@ -67,38 +95,35 @@
           <span class="section-desc">Trigger real requests through the distributed pipeline</span>
         </div>
 
-        <div class="action-card" id="card-request">
+        <div class="action-card">
           <button id="btn-request" class="btn btn-primary">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
             Standard Request
           </button>
           <p class="action-desc">
-            Sends a synchronous HTTP request through the full pipeline:
-            <strong>User &rarr; Cloudflare &rarr; API &rarr; CockroachDB</strong>.
-            Validates end-to-end latency and database connectivity.
+            <strong>User &rarr; Cloudflare &rarr; API &rarr; CockroachDB</strong><br/>
+            Synchronous request. Validates E2E latency and DB connectivity.
           </p>
         </div>
 
-        <div class="action-card" id="card-async">
+        <div class="action-card">
           <button id="btn-async" class="btn btn-secondary">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
             Async Flow
           </button>
           <p class="action-desc">
-            Enqueues an async job:
-            <strong>API &rarr; Queue &rarr; Worker &rarr; CockroachDB</strong>.
-            Demonstrates the event-driven pipeline with decoupled processing.
+            <strong>API &rarr; Queue &rarr; Worker &rarr; DB</strong><br/>
+            Event-driven pipeline with decoupled processing.
           </p>
         </div>
 
-        <div class="action-card" id="card-fail">
+        <div class="action-card">
           <button id="btn-fail" class="btn btn-danger">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
             Simulate Failure
           </button>
           <p class="action-desc">
-            Forces an error to test observability. The span is marked as <code>ERROR</code>,
-            visible in the trace stream. Tests alerting and graph error-state rendering.
+            Forces an <code>ERROR</code> span. Tests observability and error visualization.
           </p>
         </div>
       </div>
@@ -107,14 +132,14 @@
       <div class="sidebar-section">
         <div class="section-header">
           <h2>Failover Control</h2>
-          <span class="section-desc">Simulate outages and control cluster routing</span>
+          <span class="section-desc">Simulate outages to test Cloudflare Worker failover</span>
         </div>
 
-        <div class="failover-status" id="failover-status">
+        <div class="failover-status">
           <div class="cluster-row">
             <div class="cluster-indicator">
               <span class="cluster-dot healthy" id="azure-dot"></span>
-              <span class="cluster-label">Azure (AKS)</span>
+              <span class="cluster-label">Azure AKS</span>
               <span class="cluster-role-tag" id="azure-role">primary</span>
             </div>
             <button class="btn-small btn-small-danger" id="btn-down-azure">Simulate Down</button>
@@ -122,10 +147,10 @@
           <div class="cluster-row">
             <div class="cluster-indicator">
               <span class="cluster-dot standby" id="gcp-dot"></span>
-              <span class="cluster-label">GCP (GKE)</span>
+              <span class="cluster-label">GCP GKE</span>
               <span class="cluster-role-tag secondary" id="gcp-role">standby</span>
             </div>
-            <button class="btn-small btn-small-danger" id="btn-down-gcp" disabled>Simulate Down</button>
+            <button class="btn-small btn-small-muted" id="btn-down-gcp" disabled>Standby</button>
           </div>
         </div>
 
@@ -180,7 +205,7 @@
         <ul id="trace-list"></ul>
       </div>
 
-      <!-- Info footer -->
+      <!-- Footer -->
       <div class="sidebar-footer">
         <div class="tech-stack">
           <span class="tech-tag">Go</span>

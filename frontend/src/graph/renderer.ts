@@ -1,17 +1,14 @@
 import * as d3 from "d3";
 import { type Node, type Edge, NODES, EDGES } from "./nodes";
 
-// GraphRenderer manages the D3 SVG visualization.
-// It never generates data — it only reflects the state passed to it.
-// All state changes come from real WebSocket events (via main.ts).
-
 const NODE_ICONS: Record<string, string> = {
-  user: "\u{1F464}",      // 👤
-  cdn: "\u{1F310}",       // 🌐
-  api: "\u{2699}",        // ⚙
-  db: "\u{1F5C4}",        // 🗄
-  queue: "\u{1F4E8}",     // 📨
-  worker: "\u{26A1}",     // ⚡
+  user:       "\u{1F464}",
+  cdn:        "\u{1F310}",
+  "aks-api":  "\u{2699}",
+  "gke-api":  "\u{2699}",
+  db:         "\u{1F5C4}",
+  queue:      "\u{1F4E8}",
+  worker:     "\u{26A1}",
 };
 
 export class GraphRenderer {
@@ -26,7 +23,6 @@ export class GraphRenderer {
     this.setupDefs();
     this.render();
 
-    // Re-render on resize to keep centered
     const ro = new ResizeObserver(() => this.render());
     const el = this.svg.node()?.parentElement;
     if (el) ro.observe(el);
@@ -35,7 +31,6 @@ export class GraphRenderer {
   private setupDefs(): void {
     const defs = this.svg.append("defs");
 
-    // Arrow markers
     const markers = [
       { id: "arrow-idle", color: "#1e293b" },
       { id: "arrow-active", color: "#3b82f6" },
@@ -56,16 +51,6 @@ export class GraphRenderer {
         .attr("d", "M0,-5L10,0L0,5")
         .attr("fill", color);
     });
-
-    // Glow filter for active nodes
-    const glow = defs.append("filter").attr("id", "glow");
-    glow
-      .append("feGaussianBlur")
-      .attr("stdDeviation", "4")
-      .attr("result", "coloredBlur");
-    const merge = glow.append("feMerge");
-    merge.append("feMergeNode").attr("in", "coloredBlur");
-    merge.append("feMergeNode").attr("in", "SourceGraphic");
   }
 
   private render(): void {
@@ -75,9 +60,8 @@ export class GraphRenderer {
     const { width, height } = container.getBoundingClientRect();
     this.svg.attr("viewBox", `0 0 ${width} ${height}`);
 
-    // Center the graph
-    const graphWidth = 760;
-    const graphHeight = 280;
+    const graphWidth = 850;
+    const graphHeight = 310;
     const offsetX = (width - graphWidth) / 2;
     const offsetY = (height - graphHeight) / 2;
 
@@ -92,11 +76,9 @@ export class GraphRenderer {
       .attr("x2", (d) => offsetX + (this.nodeById(d.target)?.x ?? 0))
       .attr("y2", (d) => offsetY + (this.nodeById(d.target)?.y ?? 0))
       .attr("marker-end", (d) =>
-        d.state === "active"
-          ? "url(#arrow-active)"
-          : d.state === "error"
-          ? "url(#arrow-error)"
-          : "url(#arrow-idle)"
+        d.state === "active" ? "url(#arrow-active)"
+        : d.state === "error" ? "url(#arrow-error)"
+        : "url(#arrow-idle)"
       );
 
     // Nodes
@@ -107,7 +89,7 @@ export class GraphRenderer {
       .attr("class", (d) => `node state-${d.state}`)
       .attr("transform", (d) => `translate(${offsetX + d.x},${offsetY + d.y})`);
 
-    // Outer glow ring (only for active states)
+    // Outer glow ring
     nodeGroups
       .selectAll<SVGCircleElement, Node>(".ring")
       .data((d) => [d])
@@ -119,6 +101,7 @@ export class GraphRenderer {
         d.state === "processing" ? "rgba(59,130,246,0.15)"
         : d.state === "success" ? "rgba(34,197,94,0.15)"
         : d.state === "error" ? "rgba(239,68,68,0.15)"
+        : d.state === "down" ? "rgba(239,68,68,0.1)"
         : "transparent"
       )
       .attr("stroke-width", 6);
@@ -140,7 +123,7 @@ export class GraphRenderer {
       .attr("dy", "0.35em")
       .attr("text-anchor", "middle")
       .attr("font-size", "18px")
-      .text((d) => NODE_ICONS[d.id] ?? "");
+      .text((d) => d.state === "down" ? "\u{274C}" : (NODE_ICONS[d.id] ?? ""));
 
     // Label
     nodeGroups
@@ -157,13 +140,18 @@ export class GraphRenderer {
   setNodeState(nodeId: string, state: Node["state"]): void {
     const node = this.nodes.find((n) => n.id === nodeId);
     if (!node) return;
+    // Don't override "down" state with transient animation states
+    if (node.state === "down" && state !== "down" && state !== "idle") return;
     node.state = state;
     this.render();
 
-    if (state !== "idle") {
+    if (state !== "idle" && state !== "down") {
       setTimeout(() => {
-        node.state = "idle";
-        this.render();
+        // Only reset if not "down"
+        if (node.state !== "down") {
+          node.state = "idle";
+          this.render();
+        }
       }, 1500);
     }
   }
@@ -182,13 +170,11 @@ export class GraphRenderer {
     }
   }
 
-  setCluster(cluster: string): void {
-    const apiNode = this.nodes.find((n) => n.id === "api");
-    if (!apiNode) return;
-    apiNode.label =
-      cluster === "primary" ? "API (AKS)"
-      : cluster === "secondary" ? "API (GKE)"
-      : "API";
+  // Mark a cluster's API node as down/up
+  setClusterDown(clusterId: string, isDown: boolean): void {
+    const node = this.nodes.find((n) => n.id === clusterId);
+    if (!node) return;
+    node.state = isDown ? "down" : "idle";
     this.render();
   }
 
