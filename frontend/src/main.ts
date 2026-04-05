@@ -1,6 +1,6 @@
 import { TraceStream } from "./ws/stream";
 import { GraphRenderer } from "./graph/renderer";
-import { getEdgeForAction, getNodeForAction } from "./graph/nodes";
+import { getEdgesForAction, getNodeForAction, type SpanSnapshot } from "./graph/nodes";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8080";
 const STREAMER_WS  = import.meta.env.VITE_STREAMER_WS_URL ?? "ws://localhost:8081/ws";
@@ -23,6 +23,10 @@ interface RequestRecord {
   error?: string;
 }
 const requestHistory: RequestRecord[] = [];
+
+// Accumulates all spans per trace_id so we can replay the full path on the graph
+const traceSpans = new Map<string, SpanSnapshot[]>();
+let selectedTraceId: string | null = null;
 
 function el(id: string): HTMLElement | null { return document.getElementById(id); }
 
@@ -66,17 +70,38 @@ const IGNORE_ACTIONS = new Set(["/healthz", "/readyz", "/livez", "/health"]);
 stream.onEvent((event) => {
   if (IGNORE_ACTIONS.has(event.action)) return;
 
-  const nodeId = getNodeForAction(event.action, activeCluster);
-  const edgeId = getEdgeForAction(event.action, activeCluster);
+  // Accumulate span into trace buffer
+  const snap: SpanSnapshot = {
+    action: event.action,
+    status: event.status,
+    duration_ms: event.duration_ms,
+    cluster: event.cluster || activeCluster,
+    timestamp: event.timestamp,
+  };
+  if (!traceSpans.has(event.trace_id)) traceSpans.set(event.trace_id, []);
+  traceSpans.get(event.trace_id)!.push(snap);
+  // Keep map from growing unbounded (keep last 100 traces)
+  if (traceSpans.size > 100) {
+    const oldest = traceSpans.keys().next().value;
+    if (oldest) traceSpans.delete(oldest);
+  }
 
-  const nodeState = event.status === "error" ? "error"
-    : event.duration_ms > 0 ? "success"
-    : "processing";
+  // Only animate live spans when no trace is pinned
+  if (!graph.isHighlightPersisted()) {
+    const nodeId = getNodeForAction(event.action, activeCluster);
+    const edgeIds = getEdgesForAction(event.action, activeCluster);
+    const nodeState = event.status === "error" ? "error"
+      : event.duration_ms > 0 ? "success"
+      : "processing";
 
-  if (nodeId) graph.setNodeState(nodeId, nodeState);
-  // Pass latency to edge so it shows ms label on the arrow
-  const latencyForEdge = event.duration_ms > 0 ? event.duration_ms : undefined;
-  if (edgeId) graph.setEdgeState(edgeId, event.status === "error" ? "error" : "active", latencyForEdge);
+    if (nodeId) graph.setNodeState(nodeId, nodeState);
+    const latencyForEdge = event.duration_ms > 0 ? event.duration_ms : undefined;
+    edgeIds.forEach((edgeId, idx) => {
+      // Only show latency on the last edge (the backend hop)
+      graph.setEdgeState(edgeId, event.status === "error" ? "error" : "active",
+        idx === edgeIds.length - 1 ? latencyForEdge : undefined);
+    });
+  }
 
   totalSpans++;
   if (event.duration_ms > 0) latencies.push(event.duration_ms);
@@ -270,6 +295,30 @@ function addTraceToList(traceId: string, action: string, isError: boolean, durat
   if (count) count.textContent = `${activeTraces.size} traces`;
 }
 
+// --- Trace highlight from history ---
+function highlightTraceById(traceId: string): void {
+  if (traceId === "—") return;
+  const spans = traceSpans.get(traceId);
+  if (!spans || spans.length === 0) return;
+
+  selectedTraceId = traceId;
+  const cluster = spans[0].cluster || activeCluster;
+  graph.highlightTrace(spans, cluster, true);
+  renderRequestHistory(); // re-render to show selected state
+}
+
+function deselectTrace(): void {
+  if (!selectedTraceId) return;
+  selectedTraceId = null;
+  graph.clearHighlight();
+  renderRequestHistory();
+}
+
+// Click anywhere on the graph canvas to deselect
+document.getElementById("graph")?.addEventListener("click", () => {
+  if (selectedTraceId) deselectTrace();
+});
+
 // --- Request History ---
 function renderRequestHistory(): void {
   const tbody = el("request-history-body");
@@ -279,7 +328,14 @@ function renderRequestHistory(): void {
     const statusClass = r.status === "error" ? "status-error" : "status-ok";
     const statusText = r.status === "error" ? (r.error || "error") : "ok";
     const time = r.timestamp.toLocaleTimeString();
-    return `<tr class="${r.status === "error" ? "row-error" : ""}">
+    const isSelected = r.traceId === selectedTraceId;
+    const hasTrace = r.traceId !== "—" && traceSpans.has(r.traceId);
+    const rowClass = [
+      r.status === "error" ? "row-error" : "",
+      isSelected ? "row-selected" : "",
+      hasTrace ? "row-clickable" : "",
+    ].filter(Boolean).join(" ");
+    return `<tr class="${rowClass}" data-trace-id="${r.traceId}">
       <td class="cell-time">${time}</td>
       <td><span class="type-tag type-${r.type.toLowerCase()}">${r.type}</span></td>
       <td class="cell-mono">${r.latencyMs}ms</td>
@@ -287,6 +343,18 @@ function renderRequestHistory(): void {
       <td class="cell-mono cell-trace">${r.traceId === "—" ? "—" : r.traceId.slice(0, 12) + "..."}</td>
     </tr>`;
   }).join("");
+
+  // Attach click handlers to rows
+  tbody.querySelectorAll("tr[data-trace-id]").forEach((row) => {
+    row.addEventListener("click", () => {
+      const traceId = (row as HTMLElement).dataset.traceId || "—";
+      if (traceId === selectedTraceId) {
+        deselectTrace();
+      } else {
+        highlightTraceById(traceId);
+      }
+    });
+  });
 
   const countEl = el("history-count");
   if (countEl) countEl.textContent = `${requestHistory.length} requests`;

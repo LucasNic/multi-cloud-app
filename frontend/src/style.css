@@ -936,6 +936,19 @@ main {
   background: var(--surface);
 }
 
+.history-table .row-clickable {
+  cursor: pointer;
+}
+
+.history-table .row-selected td {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+.history-table .row-selected:hover td {
+  background: rgba(59, 130, 246, 0.15);
+}
+
 .history-table .row-error td {
   background: rgba(239, 68, 68, 0.04);
 }

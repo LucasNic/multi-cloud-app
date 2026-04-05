@@ -1,5 +1,5 @@
 import * as d3 from "d3";
-import { type Node, type Edge, NODES, EDGES } from "./nodes";
+import { type Node, type Edge, NODES, EDGES, type SpanSnapshot, getEdgesForAction, getNodeForAction } from "./nodes";
 
 const NODE_ICONS: Record<string, string> = {
   user:       "\u{1F464}",
@@ -21,6 +21,8 @@ export class GraphRenderer {
   private edges: EdgeWithLatency[];
   private offsetX = 0;
   private offsetY = 0;
+  private highlightTimers: ReturnType<typeof setTimeout>[] = [];
+  private persistedHighlight: { edgeIds: string[]; nodeIds: string[] } | null = null;
 
   constructor(svgSelector: string) {
     this.svg = d3.select<SVGSVGElement, unknown>(svgSelector);
@@ -224,6 +226,103 @@ export class GraphRenderer {
     if (!node) return;
     node.state = isDown ? "down" : "idle";
     this.render();
+  }
+
+  // Replay a set of spans on the graph, sequentially by timestamp.
+  // If persist=true, the highlight stays until clearHighlight() is called.
+  highlightTrace(spans: SpanSnapshot[], cluster: string, persist: boolean): void {
+    this.clearHighlight();
+
+    // Sort by timestamp so animation follows the real flow
+    const sorted = [...spans].sort((a, b) => a.timestamp - b.timestamp);
+
+    // Collect all edge/node ids for this trace (for persist mode)
+    const edgeIds: string[] = [];
+    const nodeIds: string[] = [];
+    sorted.forEach((s) => {
+      getEdgesForAction(s.action, cluster).forEach((e) => {
+        if (!edgeIds.includes(e)) edgeIds.push(e);
+      });
+      const n = getNodeForAction(s.action, cluster);
+      if (n && !nodeIds.includes(n)) nodeIds.push(n);
+    });
+
+    if (persist) {
+      this.persistedHighlight = { edgeIds, nodeIds };
+    }
+
+    // Animate each span with a small stagger
+    sorted.forEach((span, i) => {
+      const t = setTimeout(() => {
+        const spanEdgeIds = getEdgesForAction(span.action, cluster);
+        const nodeId = getNodeForAction(span.action, cluster);
+        const edgeState = span.status === "error" ? "error" : "active";
+        const nodeState = span.status === "error" ? "error" : "success";
+
+        spanEdgeIds.forEach((edgeId) => {
+          const edge = this.edges.find((e) => e.id === edgeId);
+          if (edge) {
+            edge.state = edgeState;
+            // Only set latency on the last edge (the backend hop, not user-cdn)
+            if (spanEdgeIds.indexOf(edgeId) === spanEdgeIds.length - 1) {
+              edge.latencyMs = span.duration_ms > 0 ? span.duration_ms : undefined;
+            }
+          }
+        });
+        if (nodeId) {
+          const node = this.nodes.find((n) => n.id === nodeId);
+          if (node && node.state !== "down") {
+            node.state = nodeState;
+          }
+        }
+        this.render();
+
+        // If not persisted, auto-reset this span after 2s
+        if (!persist) {
+          const reset = setTimeout(() => {
+            spanEdgeIds.forEach((edgeId) => {
+              const edge = this.edges.find((e) => e.id === edgeId);
+              if (edge && !this.persistedHighlight?.edgeIds.includes(edgeId)) {
+                edge.state = "idle";
+                edge.latencyMs = undefined;
+              }
+            });
+            if (nodeId) {
+              const node = this.nodes.find((n) => n.id === nodeId);
+              if (node && node.state !== "down" && !this.persistedHighlight?.nodeIds.includes(nodeId)) {
+                node.state = "idle";
+              }
+            }
+            this.render();
+          }, 2000);
+          this.highlightTimers.push(reset);
+        }
+      }, i * 120);
+      this.highlightTimers.push(t);
+    });
+  }
+
+  // Clear any persisted trace highlight and reset all edges/nodes to idle
+  clearHighlight(): void {
+    this.highlightTimers.forEach((t) => clearTimeout(t));
+    this.highlightTimers = [];
+
+    if (this.persistedHighlight) {
+      this.persistedHighlight.edgeIds.forEach((id) => {
+        const edge = this.edges.find((e) => e.id === id);
+        if (edge) { edge.state = "idle"; edge.latencyMs = undefined; }
+      });
+      this.persistedHighlight.nodeIds.forEach((id) => {
+        const node = this.nodes.find((n) => n.id === id);
+        if (node && node.state !== "down") node.state = "idle";
+      });
+      this.persistedHighlight = null;
+      this.render();
+    }
+  }
+
+  isHighlightPersisted(): boolean {
+    return this.persistedHighlight !== null;
   }
 
   private nodeById(id: string): Node | undefined {

@@ -44,18 +44,24 @@ export const EDGES: Edge[] = [
 ];
 
 // Maps OTel span actions → edges (uses active cluster prefix)
-export function getEdgeForAction(action: string, activeCluster: string): string | undefined {
+// Returns an array because some actions activate multiple edges (e.g. user-cdn + cdn-aks)
+export function getEdgesForAction(action: string, activeCluster: string): string[] {
   const prefix = activeCluster === "primary" ? "aks" : "gke";
-  const map: Record<string, string> = {
-    "handle_request":   `cdn-${prefix}`,
-    "db.query":         `${prefix}-db`,
-    "db.write":         "worker-db",
-    "handle_async":     `cdn-${prefix}`,
-    "queue.enqueue":    `${prefix}-queue`,
-    "worker.process":   "queue-worker",
-    "simulate_failure": `cdn-${prefix}`,
+  const map: Record<string, string[]> = {
+    "handle_request":   ["user-cdn", `cdn-${prefix}`],
+    "db.query":         [`${prefix}-db`],
+    "db.write":         ["worker-db"],
+    "handle_async":     ["user-cdn", `cdn-${prefix}`],
+    "queue.enqueue":    [`${prefix}-queue`],
+    "worker.process":   ["queue-worker"],
+    "simulate_failure": ["user-cdn", `cdn-${prefix}`],
   };
-  return map[action];
+  return map[action] ?? [];
+}
+
+// Backwards-compat single-edge accessor (returns first edge)
+export function getEdgeForAction(action: string, activeCluster: string): string | undefined {
+  return getEdgesForAction(action, activeCluster)[0];
 }
 
 // Maps OTel span actions → nodes (uses active cluster prefix)
@@ -71,4 +77,12 @@ export function getNodeForAction(action: string, activeCluster: string): string 
     "simulate_failure": prefix,
   };
   return map[action];
+}
+
+export interface SpanSnapshot {
+  action: string;
+  status: "processing" | "success" | "error";
+  duration_ms: number;
+  cluster: string;
+  timestamp: number;
 }
