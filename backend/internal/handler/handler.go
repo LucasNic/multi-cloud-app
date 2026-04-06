@@ -156,17 +156,24 @@ func (h *Handler) SimulateFailure(c *gin.Context) {
 	})
 }
 
-// SimulateDown marks this cluster as "down" in the database.
+// SimulateDown marks a cluster as "down" in the database.
+// If target_cluster is provided, marks that cluster as down.
+// Otherwise marks the current cluster as down.
 // All pods sharing the DB will see it and start returning 503.
 func (h *Handler) SimulateDown(c *gin.Context) {
 	var req struct {
-		DurationSec int `json:"duration_sec"`
+		DurationSec   int    `json:"duration_sec"`
+		TargetCluster string `json:"target_cluster"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.DurationSec <= 0 {
 		req.DurationSec = 300
 	}
 
-	cluster := os.Getenv("CLUSTER_ROLE")
+	// Use target_cluster if provided, otherwise use current cluster
+	cluster := req.TargetCluster
+	if cluster == "" {
+		cluster = os.Getenv("CLUSTER_ROLE")
+	}
 	downUntil := time.Now().Add(time.Duration(req.DurationSec) * time.Second)
 
 	_, err := h.db.Exec(`
@@ -183,6 +190,7 @@ func (h *Handler) SimulateDown(c *gin.Context) {
 	span.SetAttributes(
 		attribute.Int("duration_sec", req.DurationSec),
 		attribute.String("cluster", cluster),
+		attribute.String("requested_by", os.Getenv("CLUSTER_ROLE")),
 	)
 	span.SetStatus(codes.Error, "cluster marked as down")
 	span.End()

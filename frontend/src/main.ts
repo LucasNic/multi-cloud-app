@@ -314,12 +314,15 @@ el("btn-down-gcp")?.addEventListener("click", async () => {
       await fetch(`${BACKEND_URL}/api/simulate-down`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ duration_sec: 300 }),
+        body: JSON.stringify({
+          duration_sec: 300,
+          target_cluster: "primary"  // Mark Azure as down to promote GCP
+        }),
       });
       const failoverInfo = el("failover-info");
       const infoStatus = el("failover-info-status");
       if (failoverInfo) failoverInfo.style.display = "block";
-      if (infoStatus) infoStatus.textContent = "Switching primary to GKE...";
+      if (infoStatus) infoStatus.textContent = "Marking Azure as down — promoting GCP to primary...";
     }
     setTimeout(updateClusterInfo, 2000);
   } catch (e) {
