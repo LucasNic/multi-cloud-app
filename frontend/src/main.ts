@@ -2,7 +2,17 @@ import { TraceStream } from "./ws/stream";
 import { GraphRenderer } from "./graph/renderer";
 import { getEdgesForAction, getNodeForAction, type SpanSnapshot } from "./graph/nodes";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8080";
+// Backend URLs for both clusters
+const BACKEND_URLS = {
+  azure: import.meta.env.VITE_BACKEND_AZURE_URL ?? "http://localhost:8080",
+  gcp: import.meta.env.VITE_BACKEND_GCP_URL ?? "http://localhost:8081"
+};
+
+// Current active backend (auto-detected)
+let currentBackend: "azure" | "gcp" = "azure";
+let currentBackendUrl = BACKEND_URLS.azure;
+let previousBackend: "azure" | "gcp" = "azure";
+
 const STREAMER_WS  = import.meta.env.VITE_STREAMER_WS_URL ?? "ws://localhost:8081/ws";
 
 // --- State ---
@@ -29,6 +39,59 @@ const traceSpans = new Map<string, SpanSnapshot[]>();
 let selectedTraceId: string | null = null;
 
 function el(id: string): HTMLElement | null { return document.getElementById(id); }
+
+/**
+ * Show a toast notification
+ * @param message The message to display
+ * @param type Type of toast: 'info', 'success', 'warning', 'error'
+ * @param duration Duration in milliseconds (default: 5000)
+ */
+function showToast(message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info', duration: number = 5000): void {
+  const container = el('toast-container');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `
+    <div class="toast-icon">
+      ${type === 'success' ? '✓' : type === 'error' ? '✗' : type === 'warning' ? '⚠' : 'ℹ'}
+    </div>
+    <div class="toast-content">${message}</div>
+    <button class="toast-close" aria-label="Close">×</button>
+  `;
+
+  // Add to container
+  container.appendChild(toast);
+
+  // Trigger animation
+  setTimeout(() => {
+    toast.classList.add('show');
+  }, 10);
+
+  // Auto-remove after duration
+  const removeTimer = setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => {
+      if (toast.parentNode) {
+        toast.parentNode.removeChild(toast);
+      }
+    }, 300);
+  }, duration);
+
+  // Close button handler
+  const closeBtn = toast.querySelector('.toast-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      clearTimeout(removeTimer);
+      toast.classList.remove('show');
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.parentNode.removeChild(toast);
+        }
+      }, 300);
+    });
+  }
+}
 
 function updateMetrics(): void {
   el("metric-requests")!.textContent = totalRequests.toLocaleString();
@@ -57,10 +120,12 @@ stream.connect = function () {
     ws.addEventListener("open", () => {
       wsStatus.className = "status-pill connected";
       wsText.textContent = "Stream connected";
+      showToast('Real-time trace stream connected', 'success', 3000);
     });
     ws.addEventListener("close", () => {
       wsStatus.className = "status-pill disconnected";
       wsText.textContent = "Reconnecting...";
+      showToast('Trace stream disconnected. Attempting to reconnect...', 'warning', 5000);
     });
   }
 };
@@ -130,9 +195,59 @@ interface ClusterResponse {
   all_clusters: ClusterState[];
 }
 
+// Health check both backends to determine which is active
+async function detectActiveBackend(): Promise<"azure" | "gcp"> {
+  try {
+    // Try Azure first
+    const azureRes = await fetch(`${BACKEND_URLS.azure}/healthz`, {
+      signal: AbortSignal.timeout(2000)
+    });
+    if (azureRes.ok) {
+      const data = await azureRes.json();
+      if (data.status === "ok") {
+        return "azure";
+      }
+    }
+  } catch {
+    // Azure failed, try GCP
+  }
+  
+  try {
+    const gcpRes = await fetch(`${BACKEND_URLS.gcp}/healthz`, {
+      signal: AbortSignal.timeout(2000)
+    });
+    if (gcpRes.ok) {
+      const data = await gcpRes.json();
+      if (data.status === "ok") {
+        return "gcp";
+      }
+    }
+  } catch {
+    // Both failed
+  }
+  
+  return "azure"; // Default to Azure
+}
+
 async function updateClusterInfo(): Promise<void> {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/cluster`);
+    // Detect which backend is actually healthy
+    const healthyBackend = await detectActiveBackend();
+    
+    // Show toast if backend changed
+    if (healthyBackend !== previousBackend) {
+      if (healthyBackend === "azure") {
+        showToast('Azure cluster is now active and serving requests.', 'success', 5000);
+      } else if (healthyBackend === "gcp") {
+        showToast('GCP cluster is now active and serving requests.', 'success', 5000);
+      }
+      previousBackend = healthyBackend;
+    }
+    
+    currentBackend = healthyBackend;
+    currentBackendUrl = BACKEND_URLS[healthyBackend];
+    
+    const res = await fetch(`${currentBackendUrl}/api/cluster`);
     const data: ClusterResponse = await res.json();
     const badge = el("cluster-name");
     if (badge) {
@@ -157,14 +272,14 @@ setInterval(updateClusterInfo, 3_000);
 
 // --- Failover UI ---
 function updateFailoverUI(data: ClusterResponse): void {
-  const servingCloud = data.cloud || "azure";
   const allClusters = data.all_clusters || [];
-
   const azureState = allClusters.find(c => c.name === "primary");
-
   const azureDown = azureState?.is_down ?? false;
-  const isServingFromGke = servingCloud === "gcp";
-  const isServingFromAzure = !isServingFromGke;
+  
+  // Determine which cluster is actually serving based on our health check
+  // NOT based on data.cloud (which is just the backend we're talking to)
+  const isServingFromGke = currentBackend === "gcp";
+  const isServingFromAzure = currentBackend === "azure";
 
   // DOM refs
   const azureDot = el("azure-dot");
@@ -275,7 +390,7 @@ el("btn-down-azure")?.addEventListener("click", async () => {
 
   try {
     if (action === "simulate-down") {
-      const res = await fetch(`${BACKEND_URL}/api/simulate-down`, {
+      const res = await fetch(`${BACKEND_URLS.azure}/api/simulate-down`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ duration_sec: 300 }),
@@ -289,8 +404,13 @@ el("btn-down-azure")?.addEventListener("click", async () => {
       }
       const failoverInfo = el("failover-info");
       if (failoverInfo) failoverInfo.style.display = "block";
+      
+      // Show toast notification
+      showToast('Azure cluster marked as down. Failover to GCP initiated.', 'warning', 6000);
     } else if (action === "recover" || action === "set-primary-azure") {
-      await fetch(`${BACKEND_URL}/api/trigger-recovery`, { method: "POST" });
+      await fetch(`${BACKEND_URLS.azure}/api/trigger-recovery`, { method: "POST" });
+      // Show toast notification
+      showToast('Azure cluster recovered and set as primary.', 'success', 5000);
     }
     setTimeout(updateClusterInfo, 2000);
   } catch (e) {
@@ -311,7 +431,9 @@ el("btn-down-gcp")?.addEventListener("click", async () => {
 
   try {
     if (action === "set-primary-gcp") {
-      await fetch(`${BACKEND_URL}/api/simulate-down`, {
+      // When setting GCP as primary, we need to mark Azure as down
+      // We can call either backend, but GCP makes more sense
+      await fetch(`${BACKEND_URLS.gcp}/api/simulate-down`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -323,6 +445,9 @@ el("btn-down-gcp")?.addEventListener("click", async () => {
       const infoStatus = el("failover-info-status");
       if (failoverInfo) failoverInfo.style.display = "block";
       if (infoStatus) infoStatus.textContent = "Marking Azure as down — promoting GCP to primary...";
+      
+      // Show toast notification
+      showToast('GCP promoted to primary cluster. Azure marked as down.', 'success', 6000);
     }
     setTimeout(updateClusterInfo, 2000);
   } catch (e) {
@@ -343,7 +468,7 @@ function setupButton(id: string, endpoint: string, actionType: string): void {
     let record: RequestRecord;
 
     try {
-      const res = await fetch(`${BACKEND_URL}${endpoint}`, { method: "POST" });
+      const res = await fetch(`${currentBackendUrl}${endpoint}`, { method: "POST" });
       const elapsed = Math.round(performance.now() - start);
       const data = await res.json();
       const isError = !res.ok;
@@ -368,6 +493,13 @@ function setupButton(id: string, endpoint: string, actionType: string): void {
         btn.classList.remove("latency-flash", "latency-flash-error");
       }, 1200);
 
+      // Show toast notification
+      if (isError) {
+        showToast(`${actionType} request failed: ${data.error || `HTTP ${res.status}`}`, 'error', 5000);
+      } else {
+        showToast(`${actionType} request completed in ${elapsed}ms`, 'success', 3000);
+      }
+
     } catch (e) {
       const elapsed = Math.round(performance.now() - start);
       record = {
@@ -380,6 +512,9 @@ function setupButton(id: string, endpoint: string, actionType: string): void {
         error: "Network error",
       };
       btn.classList.remove("loading");
+      
+      // Show toast notification for network error
+      showToast(`${actionType} request failed: Network error`, 'error', 5000);
     }
 
     // Add to history
